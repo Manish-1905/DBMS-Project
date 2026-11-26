@@ -74,7 +74,7 @@ model cannot tell them apart, while exact name matching can. Hybrid recovers
 gold recall (98.6%) but keeps the embedding leak and sends ~60% more text than
 BM25. Default stays `bm25` + semantic layer.
 
-## LLM under noise (first run, unrepresentative sample)
+## LLM under noise (complex-query subset, n=200)
 
 Qwen2.5-Coder-1.5B, 200 questions per run, same 200 questions in every run.
 
@@ -84,15 +84,29 @@ Qwen2.5-Coder-1.5B, 200 questions per run, same 200 questions in every run.
 | 80% | 5% | **12%** | 25% | **34%** | 66% | 61% |
 | 95% | 7% | **8%** | 24% | **33%** | 68% | 64% |
 
-**Caveat, important:** these were the *first* 200 rows (`--end 200`), and the
+Paired significance test (same 200 questions, exact McNemar on the questions
+only one system got right; `evaluate.py --compare`):
+
+| Noise | Both correct | Only full | **Only retrieved** | Neither | Full | Retrieved | p | Verdict |
+|---|---|---|---|---|---|---|---|---|
+| 80% | 8 | 2 | **16** | 174 | 5.0% | **12.0%** | **0.001** | retrieved significantly better |
+| 95% | 9 | 5 | 6 | 180 | 7.0% | 7.5% | 1.000 | no difference |
+
+**Conclusion.** Under heavy noise (80% of the schema fake), giving the LLM the
+retrieved schema instead of the full one significantly improves accuracy on
+complex queries (12.0% vs 5.0%, p = 0.001: 16 questions gained, 2 lost). At
+extreme noise (95%) both systems fall to the same floor (~7%): the remaining
+failures are query-logic errors of the 1.5B model on complex questions, which
+retrieval cannot fix, and about half of what the retriever keeps at that level
+is still fake. Retrieval still yields more answer-bearing queries at 95%
+(33% vs 24% non-null), but not more correct ones.
+
+**Scope:** these were the *first* 200 rows (`--end 200`), and the
 parquet is sorted by query type, so the sample is 153 complex aggregations +
 47 complex retrievals and no simple questions. That explains the low absolute
-accuracy (Step 2 on all 856: ~52%). The direction is consistent with the
-hypothesis (retrieved ≥ full at every noise level; noise costs the full schema
-13–14 points of non-null answers vs 8–9 for retrieved), but at ~10% accuracy on
-200 questions the gaps are a handful of questions and may be chance.
-Re-run with `--sample 300` (stratified random) and check significance with
-`evaluate.py --compare`.
+accuracy (Step 2 on all 856: ~52%), so the results above are a **complex-query
+subset**, not the whole benchmark. A representative run would use
+`--sample 300` (stratified random), which keeps the query-type mix.
 
 ## Caveats
 

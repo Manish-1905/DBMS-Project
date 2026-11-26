@@ -38,6 +38,71 @@ def _clean(name):
     return name.strip().strip("`")
 
 
+# What precedes a string literal that is compared to a property:
+#   u.gender = 'X'   u.state <> 'X'   g.name IN ['X', 'Y'   (:User {gender: 'X'
+_CMP_BEFORE = re.compile(
+    rf"({_IDENT})\s*\.\s*({_IDENT})\s*(?:=|<>)\s*$"
+    rf"|({_IDENT})\s*\.\s*({_IDENT})\s+IN\s*\[[^\]]*$",
+    re.IGNORECASE,
+)
+_INLINE_BEFORE = re.compile(
+    rf"\(\s*(?:{_IDENT})?\s*((?::\s*(?:{_IDENT})\s*)+)\{{[^}}]*?({_IDENT})\s*:\s*$"
+)
+_LITERAL = re.compile(r"'((?:[^'\\]|\\.)*)'|\"((?:[^\"\\]|\\.)*)\"")
+
+
+def _var_map(q):
+    var_to_names = {}
+    for m in _NODE.finditer(q):
+        if m.group(1):
+            var_to_names.setdefault(_clean(m.group(1)), set()).update(
+                _clean(x) for x in re.findall(_IDENT, m.group(2)))
+    for m in _REL.finditer(q):
+        if m.group(1):
+            var_to_names.setdefault(_clean(m.group(1)), set()).update(
+                _clean(x) for x in re.findall(_IDENT, m.group(2)))
+    return var_to_names
+
+
+def literal_spans(cypher):
+    """
+    Every string literal that is compared *exactly* with a property:
+    list of (start, end, "Label.prop", value), where cypher[start:end] is the
+    literal including its quotes. Partial matches (CONTAINS, STARTS WITH, =~)
+    are left out.
+    """
+    if not cypher:
+        return []
+    var_to_names = _var_map(_STRINGS.sub("''", cypher))
+    out = []
+    for m in _LITERAL.finditer(cypher):
+        value = m.group(1) if m.group(1) is not None else m.group(2)
+        before = _STRINGS.sub("''", cypher[: m.start()])
+        c = _CMP_BEFORE.search(before)
+        if c:
+            var = _clean(c.group(1) or c.group(3))
+            prop = _clean(c.group(2) or c.group(4))
+            for owner in sorted(var_to_names.get(var, ())):
+                out.append((m.start(), m.end(), f"{owner}.{prop}", value))
+            continue
+        i = _INLINE_BEFORE.search(before)
+        if i:
+            for owner in sorted({_clean(x) for x in re.findall(_IDENT, i.group(1))}):
+                out.append((m.start(), m.end(), f"{owner}.{_clean(i.group(2))}", value))
+    return out
+
+
+def gold_literals(cypher):
+    """
+    String values the query compares a property with *exactly*
+    (=, <>, IN [...], inline {prop: 'x'}):
+
+        gold_literals("MATCH (u:User {gender: 'Female'}) WHERE u.state = 'Ohio' ...")
+        -> {("User.gender", "Female"), ("User.state", "Ohio")}
+    """
+    return {(prop, value) for _, _, prop, value in literal_spans(cypher)}
+
+
 def gold_schema_set(cypher):
     """Return {'labels': set, 'rels': set, 'props': set('Label.prop')}."""
     if not cypher:
