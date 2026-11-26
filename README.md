@@ -25,6 +25,9 @@ question (+ schema) ──► llama.cpp LLM ──► Cypher ──► Neo4j (re
 | `eval_grounding.py` | **Part 5.6.** Grounding accuracy per variant (no LLM) |
 | `graph_state.py` | **Part 5.5.** Copies the graph to a new database with recoded values (`'Female'`→`'F'` ...) and rewrites the gold queries |
 | `query_ir.py` | **Part 6.** Query plan (IR) format, schema/value checks with auto-fixes and error messages, compiler to parameterised Cypher |
+| `cypher_guard.py` | **Part 7.1–7.5.** Policy (read-only, bounded), schema (labels, relationships, direction, properties, types) and value checks, EXPLAIN, budgeted execution, repair feedback |
+| `error_taxonomy.py` | **Part 7.6.** Labels every wrong answer of any run with F1–F14 |
+| `security_bench.py` | **Part 7.8.** Harmful Cypher / harmful questions must be rejected by the policy layer |
 | `distractors.py` | **Part 4.5.** Adds fake-but-plausible labels/relationships to a schema at a chosen noise level |
 | `eval_distractors.py` | **Part 4.5.** Retrieval quality vs noise level, per retrieval method |
 | `Benchmark/MTQ-Auto/test.parquet` | MTQ questions (`question`, `schema`, `cypher`, `data_source`, ...) |
@@ -302,9 +305,30 @@ aggregation, sorting and multi-stage (`WITH`). For `ir` runs `evaluate.py` also
 shows what happened to each plan: `ok`, `ok_after_retry`, `invalid`,
 `unsupported`, `parse_error` (the last three used the fallback).
 
+## 11. Validation, repair and security (Part 7)
+
+`--repair N` works with every mode: each generated query goes through the guard
+(policy → schema/value checks → `EXPLAIN` → read-only execution with a time
+limit and a row cap). If it is blocked, fails, or returns no rows, the LLM gets
+the reasons and the context to fix it (correct direction, existing values, the
+database error) and tries again, up to N times. All attempts are saved.
+
+```bash
+uv run main.py --parquet Benchmark/MTQ-Auto/test-split.parquet --neo4j-database $DB \
+  --mode grounded --repair 2 --sample 300 --sqlite repair.sqlite
+uv run evaluate.py --sqlite repair.sqlite --by-attempt        # initial / +1 / +2 repairs
+uv run error_taxonomy.py --sqlite results.sqlite --values values/er.json   # F1–F14 for any run
+uv run security_bench.py --neo4j-database $DB                 # or --offline
+```
+
+`--repair 0` checks without repairing; `--no-repair-empty` stops "no rows" from
+counting as a failure.
+
 ## Safety notes
 
 * LLM queries run in a **read-only session** with a timeout, so a generated `DELETE` cannot wipe the graph.
+* With `--repair`, the policy layer (`cypher_guard.py`) also rejects writes, admin commands,
+  external file access, database switching and unbounded paths **before** anything runs.
 * The password comes from `NEO4J_PASSWORD`; don't hard-code it.
 
 ## Adding a new system (Parts 3–8 of the roadmap)
