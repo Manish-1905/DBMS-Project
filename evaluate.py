@@ -113,7 +113,22 @@ def evaluate_row(r):
     except (TypeError, ValueError):
         pass
     ir = ctx.get("ir") or {}
-    return {
+    try:
+        attempts = json.loads(r.get("attempts") or "null") or []
+    except (TypeError, ValueError):
+        attempts = []
+    att = {}
+    if attempts:
+        gold_rows = gold.get("result")
+        ok_k = [bool(x.get("success") and gold_ok and results_match(
+            x.get("result"), gold_rows, ordered)) for x in attempts]
+        for k in range(3):
+            att[f"att_correct_{k}"] = ok_k[min(k, len(ok_k) - 1)]
+        att["n_attempts"] = len(attempts)
+        att["first_failure"] = " ".join(sorted({f["code"] for f in attempts[0].get("failures") or []})) \
+            or ("EMPTY" if attempts[0].get("empty") else "-")
+        att["blocked"] = attempts[-1].get("stage") in ("static", "explain")
+    return {**att,
         "id": r["id"],
         "run_id": r["run_id"],
         "mode": r["mode"],
@@ -233,6 +248,8 @@ def main():
     p.add_argument("--by-feature", action="store_true",
                    help="break results down by hops / filter / aggregation / "
                         "sorting / multi-stage of the gold query (Part 6)")
+    p.add_argument("--by-attempt", action="store_true",
+                   help="Part 7: accuracy at the first attempt and after 1 and 2 repairs")
     p.add_argument("--compare", nargs=2, metavar=("RUN_A", "RUN_B"),
                    help="paired comparison of two runs (run ids or unique prefixes)")
     args = p.parse_args()
@@ -250,6 +267,25 @@ def main():
         for f in ("hops", "filter", "aggregation", "sorting", "multi_stage"):
             print()
             print_table(rows, ["run_id", f"f_{f}"])
+    att_rows = [r for r in rows if "n_attempts" in r]
+    if args.by_attempt and att_rows:
+        print("\nRepair (Part 7): correct answers by attempt")
+        print("| run_id | n | initial | +1 repair | +2 repairs | repaired | broken | "
+              "avg attempts | blocked at the end |")
+        print("|---|---|---|---|---|---|---|---|---|")
+        by = defaultdict(list)
+        for r in att_rows:
+            by[r["run_id"]].append(r)
+        for run, g in sorted(by.items()):
+            n = len(g)
+            c = [sum(r[f"att_correct_{k}"] for r in g) / n for k in range(3)]
+            fixed = sum(r["att_correct_2"] and not r["att_correct_0"] for r in g)
+            broke = sum(r["att_correct_0"] and not r["att_correct_2"] for r in g)
+            print(f"| {run} | {n} | {c[0]:.1%} | {c[1]:.1%} | {c[2]:.1%} | {fixed} | {broke} "
+                  f"| {sum(r['n_attempts'] for r in g) / n:.2f} "
+                  f"| {sum(r['blocked'] for r in g) / n:.1%} |")
+        print("\nFirst-attempt problem found by the guard (EMPTY = ran, no rows):")
+        print_table(att_rows, ["run_id", "first_failure"])
     ir_rows = [r for r in rows if r["ir_status"] != "-"]
     if ir_rows:
         print("\nPlan route (--mode ir): what happened to each question")
