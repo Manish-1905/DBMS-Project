@@ -72,5 +72,59 @@ Findings:
 
 ## 7.7 Repair benchmark
 
-To be added: `main.py --mode grounded --repair 2 --sample 300` and
-`evaluate.py --by-attempt` (initial / +1 / +2 repairs).
+`main.py --mode grounded --repair 2 --sample 300` (same 300 stratified questions
+as Step 6), then `evaluate.py --by-attempt`. Every generated query goes through
+the guard (policy → schema/value checks → EXPLAIN → read-only execution); if it
+is blocked, fails, has schema/value problems or returns no rows, the model gets
+the reasons and the context to fix them, up to 2 times.
+
+Overall: 56% correct (S3 without the guard on the same questions: 56.3%).
+292 of 300 questions produced a query (8 produced none and are not in the
+table below).
+
+| System | n | Initial | +1 repair | +2 repairs | Fixed | Broken | Avg. attempts | Blocked at the end |
+|---|---|---|---|---|---|---|---|---|
+| S3 grounded + repair | 292 | 57.9% | 57.9% | 57.9% | 0 | 0 | 1.73 | 10.3% |
+
+**Repair with feedback did not fix a single wrong answer.** Repairs were
+attempted (1.73 attempts per question on average) but no wrong answer became
+correct, and none became wrong. As in Step 6 (plans accepted after feedback were
+correct 5% of the time), the 1.5B model cannot turn precise error messages
+("the graph has (User)-[:WATCHED]->(Movie)") into a correct query.
+
+### The guard as an error detector
+
+Accuracy by what the guard found on the **first** attempt:
+
+| Guard finding (first attempt) | n | Correct |
+|---|---|---|
+| **none** | 181 | **92%** |
+| ran but no rows (EMPTY) | 5 | 0% |
+| F1 syntax (± F5, F7) | 32 | 0% |
+| F4 wrong direction (± F5) | 14 | 0% |
+| F5 nonexistent property (± F7, F8) | 55 | 0% |
+| F7 entity resolution | 5 | 40% |
+| **any finding** | **111** | **2%** (2 / 111) |
+
+The guard cannot repair queries with this model, but it predicts almost
+perfectly which answers are wrong. That enables **selective answering**:
+
+| Strategy | Questions answered | Accuracy of the answers given |
+|---|---|---|
+| always answer | 292 (100%) | 57.9% |
+| **answer only when the guard finds no problem** | **181 (62%)** | **92%** |
+
+For a natural-language interface, a confident wrong answer is worse than
+"I can't answer this reliably"; the guard turns a 58%-accurate system into one
+that answers 62% of questions with 92% accuracy and flags the rest.
+
+### Conclusions for Part 7
+
+1. **Safety comes from the policy layer**: the LLM obeyed 7/12 harmful requests;
+   the guard blocked all of them and the graph was unchanged.
+2. **Most errors are detectable before execution** (F1/F4/F5 = 84% of S3's
+   primary failures), and the guard detects them: 98% of flagged answers are
+   wrong, 92% of unflagged answers are right.
+3. **Detection ≠ repair for a small model**: feedback-driven repair fixed 0 of 111
+   flagged answers. A larger model is the obvious next test; with this model the
+   useful action on a flagged query is to abstain or warn, not to retry.
