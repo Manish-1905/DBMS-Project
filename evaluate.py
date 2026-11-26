@@ -6,6 +6,7 @@ Usage:
     python evaluate.py --sqlite cypher_benchmark.sqlite
     python evaluate.py --sqlite cypher_benchmark.sqlite --rows-csv per_question.csv
     python evaluate.py --sqlite cypher_benchmark.sqlite --by-type   # + per query_type table
+    python evaluate.py --sqlite noise.sqlite --compare RUN_A RUN_B  # paired comparison
 
 Metrics (one row per run / mode / model / dataset):
     runnable          LLM query executed without error
@@ -21,6 +22,7 @@ Metrics (one row per run / mode / model / dataset):
 import argparse
 import csv
 import json
+import math
 import re
 import sqlite3
 from collections import Counter, defaultdict
@@ -153,12 +155,57 @@ def print_table(rows, keys):
         ]) + " |")
 
 
+def mcnemar_p(b, c):
+    """Exact two-sided McNemar test on the discordant pairs b, c."""
+    n = b + c
+    if n == 0:
+        return 1.0
+    k = min(b, c)
+    p = sum(math.comb(n, i) for i in range(k + 1)) / 2 ** n
+    return min(1.0, 2 * p)
+
+
+def compare_runs(rows, run_a, run_b):
+    """
+    Paired comparison on the questions both runs answered: how many each
+    got right that the other didn't, and whether the difference is more than
+    chance (McNemar). Run ids can be given as unique prefixes.
+    """
+    ids = sorted({r["run_id"] for r in rows})
+
+    def resolve(x):
+        hits = [i for i in ids if i == x] or [i for i in ids if i.startswith(x)]
+        if len(hits) != 1:
+            raise SystemExit(f"run id {x!r} matches {hits or 'nothing'}; runs: {ids}")
+        return hits[0]
+
+    a_id, b_id = resolve(run_a), resolve(run_b)
+    key = lambda r: (r["question"], r["gold_cypher"])
+    a = {key(r): r["result_correct"] for r in rows if r["run_id"] == a_id}
+    b = {key(r): r["result_correct"] for r in rows if r["run_id"] == b_id}
+    common = sorted(a.keys() & b.keys())
+    both = sum(a[k] and b[k] for k in common)
+    only_a = sum(a[k] and not b[k] for k in common)
+    only_b = sum(b[k] and not a[k] for k in common)
+    neither = len(common) - both - only_a - only_b
+    n = len(common) or 1
+    print(f"\nPaired comparison on {len(common)} shared questions")
+    print(f"  A = {a_id}: {(both + only_a) / n:.1%} correct")
+    print(f"  B = {b_id}: {(both + only_b) / n:.1%} correct")
+    print(f"  both correct {both} | only A {only_a} | only B {only_b} | neither {neither}")
+    p = mcnemar_p(only_a, only_b)
+    verdict = "significant at 5%" if p < 0.05 else "NOT significant (could be chance)"
+    print(f"  McNemar exact p = {p:.3f}  -> {verdict}")
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--sqlite", default="cypher_benchmark.sqlite")
     p.add_argument("--rows-csv", help="Also write per-question results here")
     p.add_argument("--by-type", action="store_true",
                    help="Also break results down by MTQ query_type")
+    p.add_argument("--compare", nargs=2, metavar=("RUN_A", "RUN_B"),
+                   help="paired comparison of two runs (run ids or unique prefixes)")
     args = p.parse_args()
 
     rows = [evaluate_row(r) for r in load(args.sqlite)]
@@ -169,7 +216,9 @@ def main():
     print_table(rows, ["run_id", "mode", "model", "dataset"])
     if args.by_type:
         print()
-        print_table(rows, ["mode", "model", "dataset", "query_type"])
+        print_table(rows, ["run_id", "query_type"])
+    if args.compare:
+        compare_runs(rows, *args.compare)
 
     bad_gold = [r for r in rows if not r["gold_ok"]]
     if bad_gold:
