@@ -68,6 +68,32 @@ Paired (exact McNemar): both correct 156, only S3 13, **only S4 27**, neither 10
    not yet measured).
 6. **Cost**: about 2.7× the generation time (plan + sometimes retry + fallback).
 
+## Follow-up: fixing plan slips (replay, no new LLM calls)
+
+Error analysis of the S4 run: the most frequent plan errors were formatting
+slips — label names used where a variable was expected (80), aggregate
+synonyms such as "average" / "count_distinct" (22), Cypher written inside the
+plan (11). The checker now fixes these automatically. `replay_plans.py`
+re-checked the plans the model had already written and executed the newly
+valid ones against the gold results:
+
+| Original outcome | First plan with new checker | n | Correct |
+|---|---|---|---|
+| ok | ok | 94 | 77% |
+| invalid (→ fallback) | **ok (newly valid)** | 77 | 66% |
+| invalid (→ fallback) | still invalid | 109 | 34% |
+| ok after retry | still invalid | 20 | 5% |
+
+Valid first plans: **94 → 171**, but estimated accuracy **61.0% → 53.7%**.
+The 77 rescued questions had been answered correctly ~95% of the time by the
+fallback (direct generation) and only 66% as plans: they are mostly easy
+questions where direct generation is already excellent. **A valid plan is not
+a correct plan**, and part of S4's original gain came from failed plans falling
+back to direct generation on easy questions. Planning should be *routed* to
+the questions where it helps (multi-hop paths) rather than used everywhere;
+`replay_plans.py` estimates such routing rules from the existing runs (to be
+confirmed on a different question sample to avoid tuning on the test set).
+
 ## Caveats
 
 * One model (1.5B) and one graph; a larger model would likely produce more
