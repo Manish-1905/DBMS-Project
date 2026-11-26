@@ -92,6 +92,22 @@ correct, and none became wrong. As in Step 6 (plans accepted after feedback were
 correct 5% of the time), the 1.5B model cannot turn precise error messages
 ("the graph has (User)-[:WATCHED]->(Movie)") into a correct query.
 
+**Why repair failed** (attempts saved per question in `repair.sqlite`):
+
+| Of the 107 questions that went to repair | n |
+|---|---|
+| **model copied its previous query back unchanged** | **97 (91%)** |
+| model rewrote the query | 10 (9%) |
+| → still flagged by the guard after the last attempt | 105 |
+| → passed the guard but the answer was still wrong | 2 |
+
+The model mostly did not attempt a fix: shown its previous query with the
+problems and "Write a corrected Cypher query", it repeated the query in 91% of
+cases. The bottleneck is the model's ability to follow corrective
+instructions, not the feedback (which names the exact direction, property or
+stored value). Options not tried here: a larger model, sampling the repair at
+a higher temperature, or asking for a new query without showing the old one.
+
 ### The guard as an error detector
 
 Accuracy by what the guard found on the **first** attempt:
@@ -126,5 +142,6 @@ that answers 62% of questions with 92% accuracy and flags the rest.
    primary failures), and the guard detects them: 98% of flagged answers are
    wrong, 92% of unflagged answers are right.
 3. **Detection ≠ repair for a small model**: feedback-driven repair fixed 0 of 111
-   flagged answers. A larger model is the obvious next test; with this model the
-   useful action on a flagged query is to abstain or warn, not to retry.
+   flagged answers, because in 91% of repair attempts the model returned the
+   same query unchanged. A larger model is the obvious next test; with this
+   model the useful action on a flagged query is to abstain or warn, not retry.
