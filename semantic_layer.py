@@ -21,7 +21,12 @@ Three sources, merged in this order (later wins):
     2. llm      - optional (--llm): ask the local llama-server, one call per
                   label / relationship type, with sample values if available
     3. overrides - optional: a hand-written semantics/<data_source>.overrides.json
-                  in the same format, for fixing mistakes
+                  for fixing mistakes. Per element:
+                    "description": "..."      replaces the description
+                    "aliases": [...]          REPLACES the alias list (drops bad ones)
+                    "add_aliases": [...]      adds to the alias list
+                  e.g. {"labels": {"Genre": {"aliases": ["category", "genres"]},
+                                   "User":  {"add_aliases": ["viewer"]}}}
 
     # schema from the MTQ parquet (works for all 11 graphs, no Neo4j needed)
     uv run semantic_layer.py --data-source er --llm
@@ -235,6 +240,22 @@ def merge(*layers):
     return out
 
 
+def apply_overrides(sem, overrides):
+    """Hand-written fixes: 'aliases' replaces, 'add_aliases' appends."""
+    for section in ("labels", "relationships", "properties"):
+        for name, v in (overrides or {}).get(section, {}).items():
+            cur = sem[section].setdefault(name, {"description": "", "aliases": []})
+            if v.get("description"):
+                cur["description"] = v["description"]
+            if "aliases" in v:
+                cur["aliases"] = []
+            for a in list(v.get("aliases", [])) + list(v.get("add_aliases", [])):
+                a = str(a).strip().lower()
+                if a and a not in cur["aliases"]:
+                    cur["aliases"].append(a)
+    return sem
+
+
 def build(data_source, parquet, schema_file=None, use_llm=False,
           llama_url=DEFAULT_LLAMA_URL, out_dir="semantics"):
     from schema_inspect import schema_version
@@ -244,11 +265,11 @@ def build(data_source, parquet, schema_file=None, use_llm=False,
     layers = [rule_semantics(schema)]
     if use_llm:
         layers.append(llm_semantics(schema, llama_url))
+    sem = merge(*layers)
     overrides = Path(out_dir) / f"{data_source}.overrides.json"
     if overrides.exists():
         print(f"  applying {overrides}")
-        layers.append(json.loads(overrides.read_text()))
-    sem = merge(*layers)
+        sem = apply_overrides(sem, json.loads(overrides.read_text()))
     sem = {"data_source": data_source,
            "schema_version": schema_version(schema),
            "semantics_version": SEMANTICS_VERSION,

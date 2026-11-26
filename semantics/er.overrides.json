@@ -1,0 +1,9 @@
+{
+  "labels": {
+    "Genre": {"aliases": ["category", "categories", "classification", "genres"]},
+    "User": {"add_aliases": ["viewer", "viewers", "customer", "people"]}
+  },
+  "relationships": {
+    "USES": {"aliases": ["uses ip", "logged in from", "connects from"]}
+  }
+}
