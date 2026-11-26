@@ -6,7 +6,6 @@ import os
 import sqlite3
 import time
 import re
-from pathlib import Path
 from typing import Any, Dict, Optional
 
 import pandas as pd
@@ -578,7 +577,7 @@ def run_benchmark(
     # Load Parquet
     # --------------------------------------------------------
 
-    print(f"\nLoading dataset:")
+    print("\nLoading dataset:")
     print(f"  {parquet_path}")
 
     df = pd.read_parquet(parquet_path)
