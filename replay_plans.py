@@ -12,6 +12,11 @@ benchmark. Questions whose first plan is still invalid keep the outcome of the
 original run (retry / fallback), so the new total is an estimate.
 
     uv run replay_plans.py --sqlite plan.sqlite --neo4j-database $DB
+
+With a direct-generation run of the same questions in the same file
+(--direct grounded), it also estimates routing rules that decide per question,
+from the plan itself, whether to use the plan or direct generation. Both
+outcomes are real executions; only the choice is simulated.
 """
 
 import argparse
@@ -47,6 +52,8 @@ def main():
     p.add_argument("--run", default="ir", help="run_id prefix of the ir run")
     p.add_argument("--parquet", default="Benchmark/MTQ-Auto/test-split.parquet")
     p.add_argument("--values", default="values/er.json")
+    p.add_argument("--direct", default="grounded",
+                   help="run_id prefix of a direct-generation run on the same questions")
     p.add_argument("--neo4j-uri", default=os.environ.get("NEO4J_URI", "neo4j://127.0.0.1:7687"))
     p.add_argument("--neo4j-user", default=os.environ.get("NEO4J_USER", "neo4j"))
     p.add_argument("--neo4j-password", default=os.environ.get("NEO4J_PASSWORD", ""))
@@ -65,6 +72,16 @@ def main():
     rows = [r for r in raw_rows.values() if r["run_id"] == run]
     ex = Neo4jExecutor(a.neo4j_uri, a.neo4j_user, a.neo4j_password, a.neo4j_database)
 
+    direct_runs = sorted({x["run_id"] for x in raw_rows.values()
+                          if x["run_id"].startswith(a.direct)})
+    direct = {}
+    if len(direct_runs) == 1:
+        for x in raw_rows.values():
+            if x["run_id"] == direct_runs[0]:
+                e = evaluate_row(x)
+                direct[(e["question"], e["gold_cypher"])] = e["result_correct"]
+    per_q = []      # (plan valid?, plan correct, n_paths, has_agg, direct correct)
+
     trans = Counter()
     old_ok = new_ok = 0
     for r in rows:
@@ -74,10 +91,13 @@ def main():
         plan = first_plan(r["raw_response"])
         new_status = "no_plan"
         correct = before["result_correct"]
+        plan_info = None
         if plan is not None:
             fixed, errs, _ = validate(plan, SchemaInfo(schemas[r["dataset"]]), catalog)
             if not errs:
                 new_status = "ok"
+                plan_info = (len(fixed.get("paths") or []),
+                             bool(fixed.get("with")) or any(x.get("agg") for x in fixed["return"]))
                 if old_status != "ok":            # newly valid: execute it
                     cypher, params = compile_ir(fixed)
                     res = ex.execute_query(cypher, params)
@@ -89,6 +109,9 @@ def main():
                 new_status = "still_invalid"
         trans[(old_status, new_status, correct)] += 1
         new_ok += correct
+        key = (before["question"], before["gold_cypher"])
+        if key in direct:
+            per_q.append((plan_info, correct if plan_info else None, direct[key]))
     ex.close()
 
     n = len(rows)
@@ -106,6 +129,28 @@ def main():
         print(f"| {o} | {s} | {v} | {good[(o, s)] / v:.0%} |")
     print(f"\ncorrect overall: original {old_ok / n:.1%} -> with the current checker "
           f"(estimate) {new_ok / n:.1%}")
+
+    if per_q:
+        rules = {
+            "always direct generation": lambda pi: False,
+            "plan whenever it is valid": lambda pi: True,
+            "plan if >= 2 paths (multi-hop)": lambda pi: pi[0] >= 2,
+            "plan if >= 2 paths and no aggregation": lambda pi: pi[0] >= 2 and not pi[1],
+            "plan if no aggregation": lambda pi: not pi[1],
+        }
+        print(f"\nRouting rules on {len(per_q)} questions (vs direct run "
+              f"{direct_runs[0]}); the rule only sees the plan, never the gold query:")
+        print("| rule | uses plan | correct |")
+        print("|---|---|---|")
+        for name, use in rules.items():
+            used = ok = 0
+            for pi, plan_ok, direct_ok in per_q:
+                if pi is not None and use(pi):
+                    used += 1
+                    ok += plan_ok
+                else:
+                    ok += direct_ok
+            print(f"| {name} | {used} | {ok / len(per_q):.1%} |")
 
 
 if __name__ == "__main__":
