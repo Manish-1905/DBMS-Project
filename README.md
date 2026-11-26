@@ -14,6 +14,9 @@ question (+ schema) ──► llama.cpp LLM ──► Cypher ──► Neo4j (re
 | `schema_inspect.py` | **Part 3.** Extracts the schema, indexes, constraints and value statistics from the live Neo4j graph, with a `schema_version` hash |
 | `gold_schema.py` | **Part 4.4.** Lists the labels / relationship types / properties a gold Cypher query uses |
 | `schema_retriever.py` | **Part 4.** Picks only the part of the schema a question needs (BM25 + schema-graph shortest paths) |
+| `semantic_layer.py` | **Part 3.2.** Descriptions + aliases for every label / relationship / property (rules, local LLM, hand-written overrides) → `semantics/<graph>.json` |
+| `schema_graph.py` | **Part 3.4.** Stores the schema itself as a graph (`NodeType`, `RelationshipType`, `Property`) in a separate Neo4j database |
+| `tests/` | `uv run pytest`: schema versioning, type names, gold-schema parser, retriever, semantic layer |
 | `eval_retrieval.py` | **Part 4.4.** Benchmarks the retriever on its own (recall, context reduction); no LLM or Neo4j needed |
 | `Benchmark/MTQ-Auto/test.parquet` | MTQ questions (`question`, `schema`, `cypher`, `data_source`, ...) |
 | `Datasets/*.dump` | Neo4j database dumps, one per graph (not in git, see step 3) |
@@ -132,6 +135,37 @@ of MTQ's schema was recovered (label / relationship / direction / property / typ
 recall). The JSON also has `value_stats` (distinct counts, most common values,
 min/max), which entity/value grounding (Part 5) will use.
 
+### Semantic layer (Part 3.2)
+
+Aliases let the retriever match words that aren't in the schema ("films" → `Movie`).
+Needs llama-server running (same command as step 4):
+
+```bash
+uv run schema_inspect.py --neo4j-database $DB --out schemas/er.json      # adds sample values
+uv run semantic_layer.py --data-source er --schema-file schemas/er.json --llm
+uv run semantic_layer.py --all --llm                                     # all 11 graphs, from the parquet
+```
+
+Review `semantics/er.json`. To fix a wrong alias or description, write
+`semantics/er.overrides.json` in the same format and re-run; overrides always win.
+Commit the `semantics/` folder: it is part of the benchmark setup.
+`main.py --mode retrieved_schema` uses `semantics/<graph>.json` automatically when it exists.
+
+### Schema graph (Part 3.4)
+
+```bash
+uv run schema_graph.py --data-source er --schema-file schemas/er.json
+```
+
+Writes to a separate database `schemagraph` (created automatically in Neo4j Desktop),
+never to the benchmark database. Explore it in Neo4j Browser with `:use schemagraph`.
+
+### Tests
+
+```bash
+uv run pytest -q
+```
+
 ## 8. Schema retrieval benchmark (Part 4)
 
 Runs offline on the parquet; no LLM or Neo4j needed:
@@ -142,11 +176,14 @@ uv run eval_retrieval.py --data-source er --csv retrieval_rows.csv
 uv run schema_retriever.py --data-source er --row 3   # inspect one question
 ```
 
-First results on all 8,284 MTQ test questions (k_labels=3, k_rels=3):
+Results on all 8,284 MTQ test questions (k_labels=3, k_rels=3):
 
-| | label recall | rel recall | prop recall | all needed elements kept | context reduction |
+| Retriever | label recall | rel recall | prop recall | all needed elements kept | context reduction |
 |---|---|---|---|---|---|
-| ALL | 98.5% | 97.9% | 98.8% | 95.3% | 41.0% |
+| v1 | 98.5% | 97.9% | 98.8% | 95.3% | 41.0% |
+| v2 (fixed plural/verb matching) | 99.1% | 98.2% | 99.3% | 96.3% | 39.3% |
+
+Compare with the semantic layer: `uv run eval_retrieval.py --semantics-dir semantics`.
 
 Per-graph and per-query-type rows are printed by the script. The `missing`
 column in the CSV shows what the retriever dropped; use it to improve it.
