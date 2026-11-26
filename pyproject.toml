@@ -15,6 +15,12 @@ dependencies = [
     "requests>=2.34.2",
 ]
 
+[project.optional-dependencies]
+# Retriever 2 (embeddings):  uv sync --extra semantic
+semantic = [
+    "sentence-transformers>=3.0",
+]
+
 # This is a folder of scripts, not an installable package.
 [tool.uv]
 package = false

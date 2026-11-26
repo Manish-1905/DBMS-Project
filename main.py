@@ -562,11 +562,15 @@ def run_benchmark(
     mode: str = "full_schema",
     data_source: Optional[str] = None,
     query_timeout: float = DEFAULT_QUERY_TIMEOUT,
-    run_id: Optional[str] = None
+    run_id: Optional[str] = None,
+    retriever: str = "bm25",
+    k_elements: int = 6
 ):
 
     if run_id is None:
-        run_id = f"{mode}_{time.strftime('%Y%m%d_%H%M%S')}"
+        tag = mode if (mode != "retrieved_schema" or retriever == "bm25") \
+            else f"{mode}-{retriever}"
+        run_id = f"{tag}_{time.strftime('%Y%m%d_%H%M%S')}"
 
     print("=" * 70)
     print("TEXT-TO-CYPHER BENCHMARK")
@@ -671,7 +675,8 @@ def run_benchmark(
         # What schema the LLM actually sees depends on the mode.
         retrieved_context = None
         if mode == "retrieved_schema":
-            pruned, info = retrieve_schema(question, schema)
+            pruned, info = retrieve_schema(question, schema, retriever=retriever,
+                                           k_elements=k_elements)
             schema = json.dumps(pruned)
             retrieved_context = json.dumps(info)
             print("\nRetrieved schema elements:")
@@ -979,6 +984,21 @@ def main():
         help="Label for this run (default: <mode>_<timestamp>)"
     )
 
+    parser.add_argument(
+        "--retriever",
+        choices=["bm25", "semantic", "hybrid"],
+        default="bm25",
+        help="Schema retriever for --mode retrieved_schema "
+             "(semantic/hybrid need: uv sync --extra semantic)"
+    )
+
+    parser.add_argument(
+        "--k-elements",
+        type=int,
+        default=6,
+        help="semantic/hybrid retriever: number of top-ranked schema elements to keep"
+    )
+
     args = parser.parse_args()
 
     if not args.neo4j_password:
@@ -1014,7 +1034,11 @@ def main():
 
         query_timeout=args.query_timeout,
 
-        run_id=args.run_id
+        run_id=args.run_id,
+
+        retriever=args.retriever,
+
+        k_elements=args.k_elements
     )
 
 

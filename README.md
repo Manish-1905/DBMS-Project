@@ -14,7 +14,10 @@ question (+ schema) ──► llama.cpp LLM ──► Cypher ──► Neo4j (re
 | `schema_inspect.py` | **Part 3.** Extracts the schema, indexes, constraints and value statistics from the live Neo4j graph, with a `schema_version` hash |
 | `gold_schema.py` | **Part 4.4.** Lists the labels / relationship types / properties a gold Cypher query uses |
 | `schema_retriever.py` | **Part 4.** Picks only the part of the schema a question needs (BM25 + schema-graph shortest paths) |
-| `eval_retrieval.py` | **Part 4.4.** Benchmarks the retriever on its own (recall, context reduction); no LLM or Neo4j needed |
+| `retrievers.py` | **Part 4.2.** Ranked retrievers: BM25, semantic (embeddings), hybrid |
+| `eval_retrieval.py` | **Part 4.4–4.5.** Benchmarks the retrievers on their own (Recall@k, MRR, context reduction, distractors); no LLM or Neo4j needed |
+| `distractors.py` | **Part 4.5.** Builds schemas with a controlled share of distractor elements |
+| `prepare_text2cypher.py` | Converts Neo4j Text2Cypher 2024 into the MTQ parquet format |
 | `Benchmark/MTQ-Auto/test.parquet` | MTQ questions (`question`, `schema`, `cypher`, `data_source`, ...) |
 | `Datasets/*.dump` | Neo4j database dumps, one per graph (not in git, see step 3) |
 
@@ -132,24 +135,97 @@ of MTQ's schema was recovered (label / relationship / direction / property / typ
 recall). The JSON also has `value_stats` (distinct counts, most common values,
 min/max), which entity/value grounding (Part 5) will use.
 
-## 8. Schema retrieval benchmark (Part 4)
+## 8. Schema retrieval (Part 4)
 
-Runs offline on the parquet; no LLM or Neo4j needed:
+Part 4 decides which part of the schema the LLM sees. It is benchmarked
+**on its own first** (no LLM or Neo4j needed, it runs on the parquet files).
+
+| Plan item | File |
+|---|---|
+| 4.2 Retriever 1, lexical (BM25) | `schema_retriever.py` (default), `retrievers.py` (`bm25`) |
+| 4.2 Retriever 2, semantic (embeddings) | `retrievers.py` (`semantic`, and `hybrid` = BM25 + semantic fused) |
+| 4.2 Retriever 3, topology (smallest connected subgraph) | `schema_retriever.py`, applied after any ranker |
+| 4.4 Gold schema sets | `gold_schema.py` |
+| 4.4 Recall@1/3/5/10, MRR, recall of the pruned schema | `eval_retrieval.py` |
+| 4.5 Controlled distractors | `distractors.py`, `eval_retrieval.py --distractors` |
+| Text2Cypher 2024 dataset | `prepare_text2cypher.py` |
+
+The semantic retriever needs one extra install (PyTorch + sentence-transformers,
+about 1 GB; the embedding model, all-MiniLM-L6-v2, downloads on first use):
 
 ```bash
-uv run eval_retrieval.py                          # all 11 graphs
-uv run eval_retrieval.py --data-source er --csv retrieval_rows.csv
-uv run schema_retriever.py --data-source er --row 3   # inspect one question
+uv sync --extra semantic
 ```
 
-First results on all 8,284 MTQ test questions (k_labels=3, k_rels=3):
+### Run the benchmarks
 
-| | label recall | rel recall | prop recall | all needed elements kept | context reduction |
-|---|---|---|---|---|---|
-| ALL | 98.5% | 97.9% | 98.8% | 95.3% | 41.0% |
+```bash
+# BM25 on all 11 MTQ graphs
+uv run eval_retrieval.py --csv retrieval_rows.csv
 
-Per-graph and per-query-type rows are printed by the script. The `missing`
-column in the CSV shows what the retriever dropped; use it to improve it.
+# compare the three retrievers
+uv run eval_retrieval.py --retriever bm25 semantic hybrid
+
+# 4.5: 40 / 60 / 80 / 95 % of the schema is distractors
+uv run eval_retrieval.py --retriever bm25 semantic hybrid --distractors 0.4 0.6 0.8 0.95
+
+# inspect one question
+uv run schema_retriever.py --data-source er --row 3 --retriever semantic
+```
+
+Two tables per retriever:
+
+* **Pruned schema** (what the LLM would see): recall per element kind,
+  `full_gold_recall` (every label, relationship and property the gold query
+  needs was kept) and `context_reduction` (how much smaller the schema text is).
+* **Ranking:** Recall@k and MRR over the ranked list of all schema elements
+  (labels, relationship types, properties). A gold set usually has 4–6
+  elements, so Recall@1 can be at most 1/|gold|; look at R@5 / R@10 and MRR.
+
+Useful flags: `--k-labels/--k-rels` (BM25 selection), `--k-elements`
+(semantic/hybrid: how many top-ranked elements seed the topology step),
+`--sample 1000` (fixed random sample, faster), `--data-source er`.
+
+**Distractors (4.5).** For each question, `distractors.py` rebuilds its
+schema so a chosen share of the elements is irrelevant to the gold query. If
+the real schema has more distractors than asked for, irrelevant elements are
+hidden; if fewer, real labels and relationships are borrowed from the *other*
+MTQ graphs (some linked to the real schema), so distractors look realistic.
+Gold elements are never removed. The table reports the share actually
+achieved.
+
+### BM25 results on all 8,284 MTQ test questions
+
+| distractors | avg schema elements | all needed elements kept | context reduction | R@5 | R@10 | MRR |
+|---|---|---|---|---|---|---|
+| real schema (89% irrelevant on average) | 81 | 95.4% | 41.0% | 62.3% | 80.5% | 0.944 |
+| 40% | 8 | 96.9% | 14.9% | 84.7% | 97.4% | 0.994 |
+| 60% | 13 | 96.3% | 31.8% | 80.6% | 94.1% | 0.984 |
+| 80% | 27 | 95.8% | 52.9% | 72.1% | 88.4% | 0.964 |
+| 95% | 126 | 95.4% | 70.1% | 63.0% | 79.1% | 0.946 |
+
+So recall stays around 95% while the share of distractors goes from 40% to
+95%, and the context saving grows with it.
+
+### Text2Cypher 2024
+
+```bash
+uv run prepare_text2cypher.py          # downloads the test split from Hugging Face
+uv run eval_retrieval.py --parquet Benchmark/Text2Cypher-2024/test.parquet --retriever bm25 semantic hybrid
+```
+
+The script turns the dataset's text schemas into MTQ's JSON format. Rows are
+grouped by demo database (`graph=`) and by the dataset's source column (`type=`).
+
+### System 2 with the LLM
+
+`--retriever` also works in `main.py` (needs Neo4j and llama-server, as in step 5):
+
+```bash
+uv run main.py --parquet Benchmark/MTQ-Auto/test-split.parquet --mode retrieved_schema --retriever semantic --model Qwen2.5-Coder-1.5B --sqlite results.sqlite
+```
+
+The default run ID includes the retriever, so `evaluate.py` shows each one as its own row.
 
 ## Safety notes
 

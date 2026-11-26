@@ -127,14 +127,45 @@ def _shortest_path(adj, src, dst, max_hops=3):
     return None
 
 
-def retrieve(question, schema, k_labels=3, k_rels=3, prop_weight=0.5):
+def _ranker_seeds(question, s, retriever, k_elements):
+    """
+    Seeds from a ranked retriever (see retrievers.py): the top-k elements
+    of its ranking. A property seeds its owner label (or relationship type).
+    Returned as 0/1 scores so _select keeps exactly the seeds.
+    """
+    from retrievers import get_ranker
+    node_props = s.get("node_props", {})
+    rels = s.get("relationships", [])
+    labels = set(node_props) | {r["start"] for r in rels} | {r["end"] for r in rels}
+    rtypes = {r["type"] for r in rels} | set(s.get("rel_props", {}))
+    lab_scores = dict.fromkeys(labels, 0.0)
+    rel_scores = dict.fromkeys(rtypes, 0.0)
+    for eid, _ in get_ranker(retriever).rank(question, s)[:k_elements]:
+        owner = eid.split(".", 1)[0] if eid not in labels and eid not in rtypes else eid
+        if owner in lab_scores:
+            lab_scores[owner] = 1.0
+        elif owner in rel_scores:
+            rel_scores[owner] = 1.0
+    return lab_scores, rel_scores
+
+
+def retrieve(question, schema, k_labels=3, k_rels=3, prop_weight=0.5, retriever="bm25",
+             k_elements=6):
     """
     Return (pruned_schema_dict, info) where info lists what was selected.
+
+    retriever: "bm25" (default, the original System 2), "semantic" or
+    "hybrid". For semantic/hybrid the seeds are the top `k_elements`
+    elements of the ranking (k_labels / k_rels are not used). Steps 3-4
+    (topology + pruning) are the same for all of them.
     """
     s = _parse(schema)
     node_props = s.get("node_props", {})
     rel_props = s.get("rel_props", {})
     rels = s.get("relationships", [])
+    if retriever != "bm25":
+        lab, rel = _ranker_seeds(question, s, retriever, k_elements)
+        return _select(s, lab, rel, len(lab), len(rel), retriever, min_score=0)
 
     q = [t for t in tokens(question) if t not in STOPWORDS]
 
@@ -164,11 +195,22 @@ def retrieve(question, schema, k_labels=3, k_rels=3, prop_weight=0.5):
     bm_r = BM25(rel_docs) if rel_docs else None
     rel_scores = {T: bm_r.score(q, i) for i, T in enumerate(rtypes)} if bm_r else {}
 
-    top_l = [L for L, sc in sorted(lab_scores.items(), key=lambda x: -x[1]) if sc > 0][:k_labels]
-    top_r = [T for T, sc in sorted(rel_scores.items(), key=lambda x: -x[1]) if sc > 0][:k_rels]
+    return _select(s, lab_scores, rel_scores, k_labels, k_rels, retriever, min_score=0)
+
+
+def _select(s, lab_scores, rel_scores, k_labels, k_rels, retriever, min_score=0):
+    """Steps 2-4: keep the top-k, connect them, build the pruned schema."""
+    node_props = s.get("node_props", {})
+    rel_props = s.get("rel_props", {})
+    rels = s.get("relationships", [])
+    labels = list(lab_scores)
+    rtypes = sorted(rel_scores)
+    top_l = [L for L, sc in sorted(lab_scores.items(), key=lambda x: -x[1]) if sc > min_score][:k_labels]
+    top_r = [T for T, sc in sorted(rel_scores.items(), key=lambda x: -x[1]) if sc > min_score][:k_rels]
 
     if not top_l and not top_r:
-        return s, {"fallback": True, "labels": sorted(labels), "rels": rtypes}
+        return s, {"fallback": True, "retriever": retriever,
+                   "labels": sorted(labels), "rels": rtypes}
 
     keep_l, keep_r = set(top_l), set(top_r)
     for r in rels:
@@ -204,6 +246,7 @@ def retrieve(question, schema, k_labels=3, k_rels=3, prop_weight=0.5):
     }
     return pruned, {
         "fallback": False,
+        "retriever": retriever,
         "labels": sorted(keep_l),
         "rels": sorted(keep_r),
         "label_scores": {L: round(lab_scores[L], 3) for L in top_l},
@@ -225,12 +268,15 @@ if __name__ == "__main__":
     p.add_argument("--data-source", default="er")
     p.add_argument("--row", type=int, default=0)
     p.add_argument("--question", help="override the question text")
+    p.add_argument("--retriever", default="bm25", choices=["bm25", "semantic", "hybrid"])
+    p.add_argument("--k-elements", type=int, default=6, help="seeds for semantic/hybrid")
     a = p.parse_args()
 
     df = pd.read_parquet(a.parquet)
     row = df[df["data_source"] == a.data_source].iloc[a.row]
     question = a.question or row["question"]
-    pruned, info = retrieve(question, row["schema"])
+    pruned, info = retrieve(question, row["schema"], retriever=a.retriever,
+                            k_elements=a.k_elements)
     print("Question:", question)
     print("Gold    :", row["cypher"])
     print("Picked  :", json.dumps(info, indent=2))
