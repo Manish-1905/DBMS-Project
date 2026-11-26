@@ -10,6 +10,7 @@ Usage:
 
 Metrics (one row per run / mode / model / dataset):
     runnable          LLM query executed without error
+    empty             executed but returned no rows (e.g. wrong value)
     non_null          executed AND returned at least one non-null value
     result_correct    LLM result == gold result (column names ignored;
                       row order ignored unless the gold query has ORDER BY)
@@ -104,6 +105,9 @@ def evaluate_row(r):
         "gold_ok": gold_ok,
         "runnable": llm_ok,
         "non_null": llm_ok and has_non_null(llm.get("result")),
+        # ran fine but returned no rows: typical of a wrong value ('female'
+        # instead of 'Female') or a non-existent label
+        "empty": llm_ok and not llm.get("result"),
         "result_correct": llm_ok and gold_ok and results_match(
             llm.get("result"), gold.get("result"), ordered),
         "exact_match": normalise_query(r["LLM_cypher"])
@@ -134,7 +138,7 @@ def print_table(rows, keys):
     for r in rows:
         groups[tuple(str(r[k]) for k in keys)].append(r)
 
-    header = keys + ["n", "gold_ok", "runnable", "non_null",
+    header = keys + ["n", "gold_ok", "runnable", "empty", "non_null",
                      "result_correct", "exact_match", "avg_llm_exec_ms",
                      "avg_gold_exec_ms", "avg_gen_s"]
     print("| " + " | ".join(header) + " |")
@@ -146,6 +150,7 @@ def print_table(rows, keys):
             str(n),
             fmt(rate("gold_ok"), pct=True),
             fmt(rate("runnable"), pct=True),
+            fmt(rate("empty"), pct=True),
             fmt(rate("non_null"), pct=True),
             fmt(rate("result_correct"), pct=True),
             fmt(rate("exact_match"), pct=True),

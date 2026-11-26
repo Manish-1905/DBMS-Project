@@ -20,3 +20,4 @@ schemas/
 Datasets/*.dump
 .pytest_cache/
 .DS_Store
+values/
