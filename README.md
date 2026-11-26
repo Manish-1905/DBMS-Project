@@ -207,14 +207,21 @@ uv run distractors.py --share 0.8                  # see what gets added
 uv run eval_distractors.py --methods bm25 bm25+sem embed+sem hybrid+sem
 ```
 
-With the LLM (full noisy schema vs retrieved schema), e.g. 200 questions at 80% noise:
+With the LLM (full noisy schema vs retrieved schema), e.g. 300 questions at 80% noise.
+Use `--sample N`, not `--end N`: the parquet is sorted by query type, so the first
+N rows are all complex questions. `--sample` keeps the query-type mix and always
+picks the same questions for the same N and `--sample-seed`.
 
 ```bash
 uv run main.py --parquet Benchmark/MTQ-Auto/test-split.parquet --neo4j-database $DB \
-  --mode full_schema --distractor-share 0.8 --end 200 --sqlite noise.sqlite
+  --mode full_schema --distractor-share 0.8 --sample 300 --sqlite noise.sqlite
 uv run main.py --parquet Benchmark/MTQ-Auto/test-split.parquet --neo4j-database $DB \
-  --mode retrieved_schema --distractor-share 0.8 --end 200 --sqlite noise.sqlite
+  --mode retrieved_schema --distractor-share 0.8 --sample 300 --sqlite noise.sqlite
+uv run evaluate.py --sqlite noise.sqlite --compare full_schema_noise80 retrieved_schema_noise80
 ```
+
+`--compare` pairs the two runs question by question and gives a McNemar p-value
+(is the difference more than chance?).
 
 At 95% noise the full schema is ~17k characters: start llama-server with `-c 16384`.
 Results: `results/step4_er_retrieval.md`.
