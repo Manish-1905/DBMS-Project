@@ -146,8 +146,9 @@ uv run semantic_layer.py --data-source er --schema-file schemas/er.json --llm
 uv run semantic_layer.py --all --llm                                     # all 11 graphs, from the parquet
 ```
 
-Review `semantics/er.json`. To fix a wrong alias or description, write
-`semantics/er.overrides.json` in the same format and re-run; overrides always win.
+Review `semantics/er.json`. To fix it, edit `semantics/<graph>.overrides.json`
+and re-run: per element, `"aliases"` replaces the list (use it to drop bad ones),
+`"add_aliases"` adds to it, `"description"` replaces it. See `semantics/er.overrides.json`.
 Commit the `semantics/` folder: it is part of the benchmark setup.
 `main.py --mode retrieved_schema` uses `semantics/<graph>.json` automatically when it exists.
 
