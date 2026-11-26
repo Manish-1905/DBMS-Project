@@ -156,25 +156,22 @@ def _sem_tokens(semantics, section, name, use_descriptions=False):
     return alias_toks, desc_toks
 
 
-def retrieve(question, schema, k_labels=3, k_rels=3, prop_weight=0.5,
-             semantics=None, use_descriptions=False):
-    """
-    Return (pruned_schema_dict, info) where info lists what was selected.
+def _elements(s):
+    node_props = s.get("node_props", {})
+    rels = s.get("relationships", [])
+    labels = sorted(set(node_props) | {r["start"] for r in rels} | {r["end"] for r in rels})
+    rtypes = sorted({r["type"] for r in rels})
+    return labels, rtypes
 
-    semantics: optional dict from semantic_layer.py (aliases/descriptions);
-               aliases count almost like the element's own name.
-    """
-    s = _parse(schema)
+
+def score_bm25(question, s, semantics=None, use_descriptions=False, prop_weight=0.5):
+    """Lexical scores for every label and relationship type (0 = no match)."""
     node_props = s.get("node_props", {})
     rel_props = s.get("rel_props", {})
-    rels = s.get("relationships", [])
-
+    labels, rtypes = _elements(s)
     q = tokens(question, drop_stopwords=True)
 
-    # ---- 1. score labels ----
-    labels = list(node_props.keys() | {r["start"] for r in rels} | {r["end"] for r in rels})
-    label_docs = []
-    label_name_toks = {}
+    label_docs, label_name_toks = [], {}
     for L in labels:
         name_toks = tokens(L)
         alias_toks, desc_toks = _sem_tokens(semantics, "labels", L, use_descriptions)
@@ -185,16 +182,13 @@ def retrieve(question, schema, k_labels=3, k_rels=3, prop_weight=0.5,
         label_name_toks[L] = set(name_toks) | set(alias_toks)
         # repeat name tokens so a name hit outweighs a property hit
         label_docs.append(name_toks * 3 + alias_toks * 2 + desc_toks + prop_toks)
-    bm_l = BM25(label_docs)
-    lab_scores = {L: bm_l.score(q, i) for i, L in enumerate(labels)}
+    bm_l = BM25(label_docs) if label_docs else None
+    lab_scores = {L: bm_l.score(q, i) for i, L in enumerate(labels)} if bm_l else {}
     # property hits only add a damped bonus (an alias hit counts as a name hit)
-    for i, L in enumerate(labels):
-        name_hit = any(t in q for t in label_name_toks[L])
-        if not name_hit:
+    for L in labels:
+        if not any(t in q for t in label_name_toks[L]):
             lab_scores[L] *= prop_weight
 
-    # ---- 2. score relationship types ----
-    rtypes = sorted({r["type"] for r in rels})
     rel_docs = []
     for T in rtypes:
         alias_toks, desc_toks = _sem_tokens(semantics, "relationships", T, use_descriptions)
@@ -203,12 +197,147 @@ def retrieve(question, schema, k_labels=3, k_rels=3, prop_weight=0.5,
         rel_docs.append(toks)
     bm_r = BM25(rel_docs) if rel_docs else None
     rel_scores = {T: bm_r.score(q, i) for i, T in enumerate(rtypes)} if bm_r else {}
+    return lab_scores, rel_scores
 
-    top_l = [L for L, sc in sorted(lab_scores.items(), key=lambda x: -x[1]) if sc > 0][:k_labels]
-    top_r = [T for T, sc in sorted(rel_scores.items(), key=lambda x: -x[1]) if sc > 0][:k_rels]
+
+def element_texts(s, semantics=None):
+    """One short text per label / relationship type, for embedding."""
+    node_props = s.get("node_props", {})
+    rel_props = s.get("rel_props", {})
+    rels = s.get("relationships", [])
+    labels, rtypes = _elements(s)
+    sem = semantics or {}
+
+    def extra(section, name):
+        e = sem.get(section, {}).get(name) or {}
+        out = ""
+        if e.get("aliases"):
+            out += " Also called: " + ", ".join(e["aliases"]) + "."
+        if e.get("description"):
+            out += " " + e["description"]
+        return out
+
+    lab_txt = {}
+    for L in labels:
+        props = ", ".join(" ".join(_split_ident(p["property"])) for p in node_props.get(L, []))
+        lab_txt[L] = (f"{' '.join(_split_ident(L))}.{extra('labels', L)}"
+                      + (f" Properties: {props}." if props else ""))
+    rel_txt = {}
+    for T in rtypes:
+        ends = "; ".join(f"{r['start']} to {r['end']}" for r in rels if r["type"] == T)
+        props = ", ".join(" ".join(_split_ident(p["property"])) for p in rel_props.get(T, []))
+        rel_txt[T] = (f"{' '.join(_split_ident(T))} ({ends}).{extra('relationships', T)}"
+                      + (f" Properties: {props}." if props else ""))
+    return lab_txt, rel_txt
+
+
+def score_embed(question, s, embedder, semantics=None):
+    """Cosine similarity between the question and every label / relationship."""
+    lab_txt, rel_txt = element_texts(s, semantics)
+    qv = embedder.embed_query(question)
+    names = list(lab_txt) + list(rel_txt)
+    vecs = embedder.embed_passages([lab_txt.get(n) or rel_txt[n] for n in names])
+    sims = {n: float(sum(a * b for a, b in zip(qv, v))) for n, v in zip(names, vecs)}
+    return ({L: sims[L] for L in lab_txt}, {T: sims[T] for T in rel_txt})
+
+
+def _clip(scores, margin):
+    """
+    Keep only items within `margin` of the best similarity, as positive scores
+    (best -> margin, borderline -> ~0); everything else -> 0 ("no evidence").
+    """
+    if not scores or margin is None:
+        return scores
+    floor = max(scores.values()) - margin
+    return {n: (v - floor if v >= floor else 0.0) for n, v in scores.items()}
+
+
+def _rrf(*score_dicts, k=60, positive_only=(True, False)):
+    """Reciprocal rank fusion. Scores of 0 don't count when positive_only."""
+    fused = {}
+    for scores, pos in zip(score_dicts, positive_only):
+        ranked = [n for n, v in sorted(scores.items(), key=lambda x: -x[1]) if (v > 0 or not pos)]
+        for r, n in enumerate(ranked, 1):
+            fused[n] = fused.get(n, 0.0) + 1.0 / (k + r)
+    for scores in score_dicts:
+        for n in scores:
+            fused.setdefault(n, 0.0)
+    return fused
+
+
+METHODS = ("bm25", "embed", "hybrid")
+
+
+def score_elements(question, schema, method="bm25", semantics=None, embedder=None,
+                   use_descriptions=False, prop_weight=0.5, embed_margin=None):
+    """
+    Score every label and relationship type. Higher is better.
+
+    embed_margin=None : raw scores (full ranking, used for Recall@k / MRR).
+    embed_margin=0.1  : embedding scores outside 0.1 of the best become 0, so
+                        every method has a "no evidence" score of 0 (used when
+                        selecting what goes into the prompt).
+    """
+    s = _parse(schema)
+    if method == "bm25":
+        return score_bm25(question, s, semantics, use_descriptions, prop_weight)
+    if embedder is None:
+        raise ValueError(f"method={method!r} needs an embedder (see embedder.py)")
+    el, er = score_embed(question, s, embedder, semantics)
+    if embed_margin is not None:
+        el, er = _clip(el, embed_margin), _clip(er, embed_margin)
+    if method == "embed":
+        return el, er
+    if method == "hybrid":
+        bl, br = score_bm25(question, s, semantics, use_descriptions, prop_weight)
+        pos = (True, embed_margin is not None)
+        return _rrf(bl, el, positive_only=pos), _rrf(br, er, positive_only=pos)
+    raise ValueError(f"unknown method {method!r}; choose from {METHODS}")
+
+
+def _rank(lab_scores, rel_scores, method, cutoff=False):
+    keep = (lambda v: v > 0) if (method == "bm25" or cutoff) else (lambda v: True)
+    order = lambda d: [n for n, v in sorted(d.items(), key=lambda x: (-x[1], x[0])) if keep(v)]
+    return order(lab_scores), order(rel_scores)
+
+
+def rank_elements(question, schema, method="bm25", **kw):
+    """Ranked label list and ranked relationship list (for Recall@k / MRR)."""
+    return _rank(*score_elements(question, schema, method=method, **kw), method)
+
+
+DEFAULT_EMBED_MARGIN = 0.1
+
+
+def retrieve(question, schema, k_labels=3, k_rels=3, prop_weight=0.5,
+             semantics=None, use_descriptions=False, method="bm25", embedder=None,
+             embed_margin=DEFAULT_EMBED_MARGIN):
+    """
+    Return (pruned_schema_dict, info) where info lists what was selected.
+
+    method:    "bm25" (lexical), "embed" (embedding similarity) or "hybrid"
+               (both, fused by reciprocal rank). embed/hybrid need `embedder`.
+    embed_margin: for embed/hybrid, only elements whose cosine similarity is
+               within this of the best one can be selected (tune it with
+               eval_retrieval.py / eval_distractors.py --embed-margin).
+    semantics: optional dict from semantic_layer.py (aliases/descriptions);
+               aliases count almost like the element's own name.
+    """
+    s = _parse(schema)
+    node_props = s.get("node_props", {})
+    rel_props = s.get("rel_props", {})
+    rels = s.get("relationships", [])
+    labels, rtypes = _elements(s)
+
+    lab_scores, rel_scores = score_elements(
+        question, s, method=method, semantics=semantics, embedder=embedder,
+        use_descriptions=use_descriptions, prop_weight=prop_weight,
+        embed_margin=embed_margin)
+    top_l, top_r = _rank(lab_scores, rel_scores, method, cutoff=True)
+    top_l, top_r = top_l[:k_labels], top_r[:k_rels]
 
     if not top_l and not top_r:
-        return s, {"fallback": True, "labels": sorted(labels), "rels": rtypes,
+        return s, {"fallback": True, "method": method, "labels": labels, "rels": rtypes,
                    "semantics": bool(semantics)}
 
     keep_l, keep_r = set(top_l), set(top_r)
@@ -216,7 +345,7 @@ def retrieve(question, schema, k_labels=3, k_rels=3, prop_weight=0.5,
         if r["type"] in keep_r:
             keep_l |= {r["start"], r["end"]}
 
-    # ---- 3. topology: connect the kept labels ----
+    # ---- topology: connect the kept labels ----
     adj = _neighbours(rels)
     seeds = sorted(keep_l)
     for i in range(len(seeds)):
@@ -234,7 +363,7 @@ def retrieve(question, schema, k_labels=3, k_rels=3, prop_weight=0.5,
             keep_l.add(nb)
             keep_r.add(rt)
 
-    # ---- 4. build pruned schema ----
+    # ---- build pruned schema ----
     pruned = {
         "node_props": {L: v for L, v in node_props.items() if L in keep_l},
         "rel_props": {T: v for T, v in rel_props.items() if T in keep_r},
@@ -245,11 +374,13 @@ def retrieve(question, schema, k_labels=3, k_rels=3, prop_weight=0.5,
     }
     return pruned, {
         "fallback": False,
+        "method": method,
+        "embed_margin": embed_margin if method != "bm25" else None,
         "semantics": bool(semantics),
         "labels": sorted(keep_l),
         "rels": sorted(keep_r),
-        "label_scores": {L: round(lab_scores[L], 3) for L in top_l},
-        "rel_scores": {T: round(rel_scores[T], 3) for T in top_r},
+        "label_scores": {L: round(lab_scores[L], 4) for L in top_l},
+        "rel_scores": {T: round(rel_scores[T], 4) for T in top_r},
     }
 
 
