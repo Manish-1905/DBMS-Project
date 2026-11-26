@@ -5,6 +5,7 @@ Compute benchmark metrics from the SQLite file written by main.py.
 Usage:
     python evaluate.py --sqlite cypher_benchmark.sqlite
     python evaluate.py --sqlite cypher_benchmark.sqlite --rows-csv per_question.csv
+    python evaluate.py --sqlite cypher_benchmark.sqlite --by-type   # + per query_type table
 
 Metrics (one row per run / mode / model / dataset):
     runnable          LLM query executed without error
@@ -96,6 +97,7 @@ def evaluate_row(r):
         "mode": r["mode"],
         "model": r["LLM_model"],
         "dataset": r["dataset"],
+        "query_type": r.get("query_type") or "unknown",
         "question": r["question"],
         "gold_ok": gold_ok,
         "runnable": llm_ok,
@@ -124,31 +126,22 @@ def fmt(x, scale=1, digits=2, pct=False):
     return f"{x * 100:.0f}%" if pct else f"{x * scale:.{digits}f}"
 
 
-def main():
-    p = argparse.ArgumentParser()
-    p.add_argument("--sqlite", default="cypher_benchmark.sqlite")
-    p.add_argument("--rows-csv", help="Also write per-question results here")
-    args = p.parse_args()
-
-    rows = [evaluate_row(r) for r in load(args.sqlite)]
-    if not rows:
-        print("No rows found.")
-        return
-
+def print_table(rows, keys):
+    """One markdown row per distinct combination of `keys`."""
     groups = defaultdict(list)
     for r in rows:
-        groups[(r["run_id"], r["mode"], r["model"], r["dataset"])].append(r)
+        groups[tuple(str(r[k]) for k in keys)].append(r)
 
-    header = ["run_id", "mode", "model", "dataset", "n", "gold_ok",
-              "runnable", "non_null", "result_correct", "exact_match",
-              "avg_llm_exec_ms", "avg_gold_exec_ms", "avg_gen_s"]
+    header = keys + ["n", "gold_ok", "runnable", "non_null",
+                     "result_correct", "exact_match", "avg_llm_exec_ms",
+                     "avg_gold_exec_ms", "avg_gen_s"]
     print("| " + " | ".join(header) + " |")
     print("|" + "---|" * len(header))
-    for (run_id, mode, model, ds), g in sorted(groups.items()):
+    for key, g in sorted(groups.items()):
         n = len(g)
         rate = lambda k: sum(r[k] for r in g) / n
-        print("| " + " | ".join([
-            run_id, mode, model, ds, str(n),
+        print("| " + " | ".join(list(key) + [
+            str(n),
             fmt(rate("gold_ok"), pct=True),
             fmt(rate("runnable"), pct=True),
             fmt(rate("non_null"), pct=True),
@@ -158,6 +151,25 @@ def main():
             fmt(mean(r["gold_exec_s"] for r in g), 1000, 3),
             fmt(mean(r["gen_s"] for r in g)),
         ]) + " |")
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--sqlite", default="cypher_benchmark.sqlite")
+    p.add_argument("--rows-csv", help="Also write per-question results here")
+    p.add_argument("--by-type", action="store_true",
+                   help="Also break results down by MTQ query_type")
+    args = p.parse_args()
+
+    rows = [evaluate_row(r) for r in load(args.sqlite)]
+    if not rows:
+        print("No rows found.")
+        return
+
+    print_table(rows, ["run_id", "mode", "model", "dataset"])
+    if args.by_type:
+        print()
+        print_table(rows, ["mode", "model", "dataset", "query_type"])
 
     bad_gold = [r for r in rows if not r["gold_ok"]]
     if bad_gold:
