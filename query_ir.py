@@ -48,6 +48,41 @@ class IRError(Exception):
     pass
 
 
+# Words small models use for aggregates -> (aggregate, distinct)
+AGG_SYNONYMS = {
+    "average": ("avg", False), "mean": ("avg", False), "total": ("sum", False),
+    "minimum": ("min", False), "maximum": ("max", False), "number": ("count", False),
+    "count_distinct": ("count", True), "countdistinct": ("count", True),
+    "distinct_count": ("count", True), "count distinct": ("count", True),
+    "list": ("collect", False),
+}
+_AGG_IN_EXPR = re.compile(r"^\s*([A-Za-z_]+)\s*\(\s*(DISTINCT\s+)?([^()]*?)\s*\)\s*$", re.I)
+
+
+def _normalise_agg(item, warnings, where):
+    """
+    Certain fixes for aggregate items: synonyms ("average" -> avg,
+    "count_distinct" -> count + distinct) and Cypher written into "expr"
+    ("count(DISTINCT m)" -> agg count, expr m, distinct).
+    """
+    m = _AGG_IN_EXPR.match(str(item.get("expr") or ""))
+    if m and not item.get("agg"):
+        name = m.group(1).lower()
+        name, dist = AGG_SYNONYMS.get(name, (name, False))
+        if name in AGGS:
+            warnings.append(f"{where}: '{item['expr']}' -> agg {name} of '{m.group(3)}'")
+            item["agg"], item["expr"] = name, m.group(3) or "*"
+            item["distinct"] = bool(m.group(2)) or dist or item.get("distinct", False)
+    agg = item.get("agg")
+    if agg:
+        key = str(agg).strip().lower().replace("-", "_")
+        if key not in AGGS and key in AGG_SYNONYMS:
+            name, dist = AGG_SYNONYMS[key]
+            warnings.append(f"{where}: aggregate '{agg}' -> '{name}'")
+            item["agg"] = name
+            item["distinct"] = item.get("distinct", False) or dist
+
+
 def _q(name):
     return name if _ID.match(name) else "`" + name.replace("`", "``") + "`"
 
@@ -122,6 +157,59 @@ def validate(ir, schema, catalog=None):
             warnings.append(f"label '{L}' -> '{fixed}'")
             n["label"] = fixed
         var_label[v] = fixed
+
+    # ---- label names used instead of variables (a common slip) ----
+    def resolve_var(name, where, declare=True):
+        """
+        "Genre" used where a variable is expected: use the variable declared
+        with that label if there is exactly one; otherwise declare one.
+        """
+        if name in var_label or not isinstance(name, str):
+            return name
+        label = _fix_case(name, sch.node_props)
+        if label is None:
+            return name
+        same = [v for v, L in var_label.items() if L == label]
+        if len(same) == 1:
+            warnings.append(f"{where}: label '{name}' used as a variable -> '{same[0]}'")
+            return same[0]
+        if not same and declare:
+            new = label[0].lower() + "".join(c for c in label[1:] if c.isalnum())
+            while new in var_label:
+                new += "_"
+            var_label[new] = label
+            ir.setdefault("nodes", []).append({"var": new, "label": label})
+            warnings.append(f"{where}: undeclared '{name}' -> new node ({new}:{label})")
+            return new
+        return name
+
+    for i, p in enumerate(ir.get("paths") or []):
+        for end in ("from", "to"):
+            p[end] = resolve_var(p.get(end), f"paths[{i}].{end}")
+
+    def resolve_expr_label(e, where):
+        """'Movie.title' where Movie is a label, not a variable -> 'm.title'."""
+        m = _EXPR.match(str(e or ""))
+        if m and m.group(1) not in var_label:
+            v = resolve_var(m.group(1), where, declare=False)
+            if v != m.group(1):
+                return v + (f".{m.group(2)}" if m.group(2) else "")
+        return e
+
+    for i, f in enumerate(ir.get("filters") or []):
+        if "expr" in f:
+            f["expr"] = resolve_expr_label(f["expr"], f"filters[{i}]")
+    for i, r in enumerate(ir.get("return") or []):
+        _normalise_agg(r, warnings, f"return[{i}]")
+        r["expr"] = resolve_expr_label(r.get("expr"), f"return[{i}]")
+    for i, o in enumerate(ir.get("order_by") or []):
+        o["expr"] = resolve_expr_label(o.get("expr"), f"order_by[{i}]")
+    if isinstance(ir.get("with"), dict):
+        for i, g in enumerate(ir["with"].get("group_by") or []):
+            g["expr"] = resolve_expr_label(g.get("expr"), f"with.group_by[{i}]")
+        for i, a in enumerate(ir["with"].get("aggregates") or []):
+            _normalise_agg(a, warnings, f"with.aggregates[{i}]")
+            a["expr"] = resolve_expr_label(a.get("expr"), f"with.aggregates[{i}]")
 
     # ---- paths ----
     rel_var_type = {}
