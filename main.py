@@ -17,6 +17,8 @@ from semantic_layer import load_semantics, merge, rule_semantics
 from distractors import add_distractors
 from grounding import Grounder, prompt_text as grounding_prompt
 from value_index import load_catalog
+from query_ir import (IR_SYSTEM_PROMPT, SchemaInfo, compile_ir, feedback_text,
+                      ir_user_prompt, parse_plan, validate)
 
 
 # ============================================================
@@ -44,8 +46,12 @@ DEFAULT_QUERY_TIMEOUT = 30
 #                       the schema (see schema_retriever.py)
 #   grounded         -> System 3 : retrieved schema + the values in the graph
 #                       that the question refers to (see grounding.py)
+#   ir               -> System 4 : like grounded, but the LLM writes a query
+#                       PLAN that is checked against the schema and compiled
+#                       to Cypher (see query_ir.py); falls back to grounded
+#                       when the plan can't express the question
 # Later parts add new modes here (grounded, ...).
-MODES = ["no_schema", "full_schema", "retrieved_schema", "grounded"]
+MODES = ["no_schema", "full_schema", "retrieved_schema", "grounded", "ir"]
 
 # Bump this whenever you change SYSTEM_PROMPT or build_user_prompt,
 # so results from different prompts are never mixed up.
@@ -268,6 +274,67 @@ def extract_json(text: str) -> Dict[str, Any]:
     )
 
 
+def call_llm_json(llama_url, model_name, system, user, temperature=0.0,
+                  max_tokens=1024, timeout=300):
+    """One chat call that must return JSON -> (parsed dict or None, raw, seconds)."""
+    payload = {
+        "model": model_name,
+        "messages": [{"role": "system", "content": system},
+                     {"role": "user", "content": user}],
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "response_format": {"type": "json_object"},
+    }
+    t0 = time.perf_counter()
+    response = requests.post(llama_url, json=payload, timeout=timeout)
+    seconds = time.perf_counter() - t0
+    response.raise_for_status()
+    raw = response.json()["choices"][0]["message"]["content"]
+    try:
+        return extract_json(raw), raw, seconds
+    except ValueError:
+        return None, raw, seconds
+
+
+def generate_with_plan(llama_url, model_name, question, prompt_schema, full_schema,
+                       grounding_block, catalog, retries=1):
+    """
+    Part 6: LLM -> plan (IR) -> validate (auto-fix certain mistakes; send the
+    others back to the LLM) -> compile to Cypher. Returns a dict with cypher,
+    params and what happened; cypher is None when the plan route failed.
+    """
+    sch = SchemaInfo(full_schema)
+    feedback, previous = "", None
+    calls, seconds, raws = 0, 0.0, []
+    status, errors, warnings, plan = None, [], [], None
+    for attempt in range(retries + 1):
+        user = ir_user_prompt(question, prompt_schema, grounding_block, feedback)
+        obj, raw, sec = call_llm_json(llama_url, model_name, IR_SYSTEM_PROMPT, user)
+        calls += 1
+        seconds += sec
+        raws.append(raw)
+        if obj is None:
+            status = "parse_error"
+            break
+        plan = parse_plan(obj)
+        if plan is None:
+            status = "unsupported"
+            break
+        plan, errors, warnings = validate(plan, sch, catalog)
+        if not errors:
+            status = "ok" if attempt == 0 else "ok_after_retry"
+            break
+        status = "invalid"
+        previous = plan
+        feedback = feedback_text(errors, previous)
+    result = {"status": status, "plan": plan, "errors": errors, "warnings": warnings,
+              "llm_calls": calls, "seconds": seconds, "raw": raws,
+              "cypher": None, "params": {}}
+    if status in ("ok", "ok_after_retry"):
+        result["cypher"], result["params"] = compile_ir(plan, use_params=True)
+    return result
+
+
 def generate_cypher(
     llama_url: str,
     model_name: str,
@@ -391,7 +458,7 @@ class Neo4jExecutor:
 
         self.driver.verify_connectivity()
 
-    def execute_query(self, cypher: str):
+    def execute_query(self, cypher: str, params: Optional[Dict[str, Any]] = None):
 
         if not cypher:
             return {
@@ -414,7 +481,8 @@ class Neo4jExecutor:
             ) as session:
 
                 result = session.run(
-                    Query(cypher, timeout=self.query_timeout)
+                    Query(cypher, timeout=self.query_timeout),
+                    params or {}
                 )
 
                 # Consume the complete result.
@@ -606,25 +674,26 @@ def run_benchmark(
     embed_margin: float = 0.1,
     sample: Optional[int] = None,
     sample_seed: int = 0,
-    values_file: Optional[str] = None
+    values_file: Optional[str] = None,
+    ir_retries: int = 1
 ):
 
     if run_id is None:
         tag = mode
-        if mode in ("retrieved_schema", "grounded") and retriever != "bm25":
+        if mode in ("retrieved_schema", "grounded", "ir") and retriever != "bm25":
             tag += f"-{retriever}"
         if distractor_share and mode != "no_schema":
             tag += f"_noise{int(round(distractor_share * 100))}"
         run_id = f"{tag}_{time.strftime('%Y%m%d_%H%M%S')}"
 
     embedder = None
-    if mode in ("retrieved_schema", "grounded") and retriever != "bm25":
+    if mode in ("retrieved_schema", "grounded", "ir") and retriever != "bm25":
         from embedder import get_embedder
         embedder = get_embedder(embed_model)
     noisy_cache = {}
 
     # Part 5: value catalog(s) for --mode grounded, loaded once per graph.
-    grounders, grounder_states = {}, {}
+    grounders, grounder_states, grounder_catalogs = {}, {}, {}
 
     def get_grounder(ds):
         if ds not in grounders:
@@ -636,6 +705,7 @@ def run_benchmark(
                     f"<db> --out {path}")
             cat = load_catalog(path)
             grounders[ds] = Grounder(cat)
+            grounder_catalogs[ds] = cat
             grounder_states[ds] = cat.get("state_version")
             print(f"Value catalog {path}: state_version {cat.get('state_version')}, "
                   f"database {cat.get('database')}")
@@ -762,7 +832,8 @@ def run_benchmark(
         # What schema the LLM actually sees depends on the mode.
         retrieved_context = None
         grounding_block = ""
-        if mode in ("retrieved_schema", "grounded"):
+        full_schema_text = schema
+        if mode in ("retrieved_schema", "grounded", "ir"):
             pruned, info = retrieve_schema(
                 question, schema,
                 semantics=semantics,
@@ -775,7 +846,7 @@ def run_benchmark(
             print("\nRetrieved schema elements:")
             print(f"  labels={info['labels']}  rels={info['rels']}"
                   f"  semantics={info['semantics']}  method={retriever}")
-            if mode == "grounded":
+            if mode in ("grounded", "ir"):
                 grounder = get_grounder(dataset)
                 grounded = grounder.ground(question, schema_labels=set(info["labels"]))
                 grounding_block = grounding_prompt(grounded)
@@ -785,7 +856,8 @@ def run_benchmark(
                 for gv in grounded:
                     print(f"  \"{gv['surface']}\" -> {gv['property']} = "
                           f"{gv['value']!r} ({gv['method']}, {gv['score']})")
-            retrieved_context = json.dumps(info)
+            if mode != "ir":
+                retrieved_context = json.dumps(info)
         elif distractor_share and mode == "full_schema":
             retrieved_context = json.dumps({"distractor_share": distractor_share,
                                             "seed": distractor_seed})
@@ -802,16 +874,46 @@ def run_benchmark(
 
         print("\nGenerating Cypher...")
 
+        llm_params = {}
         try:
+            plan_result = None
+            if mode == "ir":
+                plan_result = generate_with_plan(
+                    llama_url, model_name, question, schema, full_schema_text,
+                    grounding_block, grounder_catalogs.get(dataset), retries=ir_retries)
+                print(f"Plan: {plan_result['status']} "
+                      f"({plan_result['llm_calls']} LLM call(s))")
+                for wmsg in plan_result["warnings"]:
+                    print(f"  auto-fix: {wmsg}")
+                for emsg in plan_result["errors"]:
+                    print(f"  error: {emsg}")
 
-            generated = generate_cypher(
-                llama_url=llama_url,
-                model_name=model_name,
-                question=question,
-                schema=schema,
-                mode=mode,
-                grounding=grounding_block
-            )
+            if plan_result and plan_result["cypher"]:
+                generated = {"cypher": plan_result["cypher"], "reason": "compiled from plan",
+                             "generation_time": plan_result["seconds"],
+                             "raw_response": json.dumps(plan_result["raw"])}
+                llm_params = plan_result["params"]
+            else:
+                # direct generation (all other modes, and the ir fallback)
+                generated = generate_cypher(
+                    llama_url=llama_url,
+                    model_name=model_name,
+                    question=question,
+                    schema=schema,
+                    mode="grounded" if mode == "ir" else mode,
+                    grounding=grounding_block
+                )
+                if plan_result:
+                    generated["generation_time"] += plan_result["seconds"]
+                    generated["raw_response"] = json.dumps(
+                        plan_result["raw"] + [generated["raw_response"]])
+
+            if plan_result:
+                info["ir"] = {k: plan_result[k] for k in
+                              ("status", "plan", "errors", "warnings", "llm_calls")}
+                info["ir"]["fallback"] = not plan_result["cypher"]
+                info["ir"]["params"] = llm_params
+                retrieved_context = json.dumps(info, default=str)
 
             llm_cypher = generated["cypher"]
             llm_reason = generated["reason"]
@@ -825,6 +927,8 @@ def run_benchmark(
 
             print("\nLLM Cypher:")
             print(llm_cypher)
+            if llm_params:
+                print(f"Parameters: {llm_params}")
 
         except Exception as e:
 
@@ -847,7 +951,7 @@ def run_benchmark(
         if llm_cypher:
 
             llm_execution = neo4j.execute_query(
-                llm_cypher
+                llm_cypher, llm_params
             )
 
         else:
@@ -1074,6 +1178,13 @@ def main():
     parser.add_argument("--sample-seed", type=int, default=0)
 
     parser.add_argument(
+        "--ir-retries",
+        type=int,
+        default=1,
+        help="--mode ir: how often a rejected plan is sent back with the errors"
+    )
+
+    parser.add_argument(
         "--values-file",
         default=None,
         help="--mode grounded: value catalog from value_index.py "
@@ -1089,7 +1200,8 @@ def main():
         help="no_schema = LLM only (System 0), "
              "full_schema = LLM + full schema (System 1), "
              "retrieved_schema = LLM + retrieved schema (System 2), "
-             "grounded = retrieved schema + graph values (System 3)"
+             "grounded = retrieved schema + graph values (System 3), "
+             "ir = plan -> check -> compiled Cypher (System 4)"
     )
 
     parser.add_argument(
@@ -1193,7 +1305,9 @@ def main():
 
         sample_seed=args.sample_seed,
 
-        values_file=args.values_file
+        values_file=args.values_file,
+
+        ir_retries=args.ir_retries
     )
 
 
