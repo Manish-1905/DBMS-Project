@@ -1,0 +1,23 @@
+[project]
+name = "dbms-project"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Triman Singh", email = "trimantuteja@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "duckdb>=1.1.0",
+    "neo4j>=6.4.0",
+    "pandas>=3.0.6",
+    "pyarrow>=25.0.1",
+    "requests>=2.34.2",
+]
+
+[project.scripts]
+dbms-project = "dbms_project:main"
+
+[build-system]
+requires = ["uv_build>=0.12.23,<0.13.0"]
+build-backend = "uv_build"
