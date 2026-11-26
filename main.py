@@ -13,6 +13,8 @@ import pandas as pd
 import requests
 from neo4j import GraphDatabase, Query, READ_ACCESS
 
+from schema_retriever import retrieve as retrieve_schema
+
 
 # ============================================================
 # CONFIGURATION
@@ -35,8 +37,10 @@ DEFAULT_QUERY_TIMEOUT = 30
 # Which system is being tested (roadmap Part 2 / Part 8):
 #   no_schema   -> System 0 / A : question only
 #   full_schema -> System 1 / B : question + full graph schema
-# Later parts add new modes here (retrieved_schema, grounded, ...).
-MODES = ["no_schema", "full_schema"]
+#   retrieved_schema -> System 2 : question + only the relevant part of
+#                       the schema (see schema_retriever.py)
+# Later parts add new modes here (grounded, ...).
+MODES = ["no_schema", "full_schema", "retrieved_schema"]
 
 # Bump this whenever you change SYSTEM_PROMPT or build_user_prompt,
 # so results from different prompts are never mixed up.
@@ -132,7 +136,11 @@ CREATE TABLE IF NOT EXISTS benchmark_results (
 
     run_id TEXT,
 
-    raw_response TEXT
+    raw_response TEXT,
+
+    query_type TEXT,
+
+    retrieved_context TEXT
 
 );
 """
@@ -144,6 +152,8 @@ NEW_COLUMNS = {
     "prompt_version": "TEXT",
     "run_id": "TEXT",
     "raw_response": "TEXT",
+    "query_type": "TEXT",
+    "retrieved_context": "TEXT",
 }
 
 
@@ -175,8 +185,10 @@ def build_user_prompt(question: str, schema: str, mode: str) -> str:
     """
     Build the actual prompt sent to the LLM.
 
-    no_schema   : only the natural-language question.
-    full_schema : question + the full graph schema.
+    no_schema        : only the natural-language question.
+    full_schema      : question + the full graph schema.
+    retrieved_schema : question + the pruned schema (the caller passes the
+                       already-pruned schema in `schema`).
     """
 
     if mode == "no_schema":
@@ -473,10 +485,12 @@ INSERT INTO benchmark_results (
     mode,
     prompt_version,
     run_id,
-    raw_response
+    raw_response,
+    query_type,
+    retrieved_context
 
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 """
 
 
@@ -496,7 +510,9 @@ def save_result(
     mode=None,
     prompt_version=None,
     run_id=None,
-    raw_response=None
+    raw_response=None,
+    query_type=None,
+    retrieved_context=None
 ):
 
     conn.execute(
@@ -520,7 +536,9 @@ def save_result(
             mode,
             prompt_version,
             run_id,
-            raw_response
+            raw_response,
+            query_type,
+            retrieved_context
         )
     )
 
@@ -647,6 +665,18 @@ def run_benchmark(
 
         benchmark_cypher = str(row["cypher"])
         dataset = str(row["data_source"])
+        query_type = (
+            str(row["query_type"]) if "query_type" in row.index else None
+        )
+
+        # What schema the LLM actually sees depends on the mode.
+        retrieved_context = None
+        if mode == "retrieved_schema":
+            pruned, info = retrieve_schema(question, schema)
+            schema = json.dumps(pruned)
+            retrieved_context = json.dumps(info)
+            print("\nRetrieved schema elements:")
+            print(f"  labels={info['labels']}  rels={info['rels']}")
 
         print("\nQuestion:")
         print(question)
@@ -812,7 +842,11 @@ def run_benchmark(
 
             run_id=run_id,
 
-            raw_response=raw_response
+            raw_response=raw_response,
+
+            query_type=query_type,
+
+            retrieved_context=retrieved_context
         )
 
         print("\nSaved to SQLite.")
@@ -921,8 +955,9 @@ def main():
         "--mode",
         choices=MODES,
         default="full_schema",
-        help="no_schema = LLM only (System A), "
-             "full_schema = LLM + full schema (System B)"
+        help="no_schema = LLM only (System 0), "
+             "full_schema = LLM + full schema (System 1), "
+             "retrieved_schema = LLM + retrieved schema (System 2)"
     )
 
     parser.add_argument(
