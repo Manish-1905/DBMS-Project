@@ -13,6 +13,7 @@ import requests
 from neo4j import GraphDatabase, Query, READ_ACCESS
 
 from schema_retriever import retrieve as retrieve_schema
+from semantic_layer import load_semantics
 
 
 # ============================================================
@@ -562,7 +563,8 @@ def run_benchmark(
     mode: str = "full_schema",
     data_source: Optional[str] = None,
     query_timeout: float = DEFAULT_QUERY_TIMEOUT,
-    run_id: Optional[str] = None
+    run_id: Optional[str] = None,
+    semantics_dir: Optional[str] = "semantics"
 ):
 
     if run_id is None:
@@ -671,11 +673,15 @@ def run_benchmark(
         # What schema the LLM actually sees depends on the mode.
         retrieved_context = None
         if mode == "retrieved_schema":
-            pruned, info = retrieve_schema(question, schema)
+            pruned, info = retrieve_schema(
+                question, schema,
+                semantics=load_semantics(dataset, semantics_dir)
+            )
             schema = json.dumps(pruned)
             retrieved_context = json.dumps(info)
             print("\nRetrieved schema elements:")
-            print(f"  labels={info['labels']}  rels={info['rels']}")
+            print(f"  labels={info['labels']}  rels={info['rels']}"
+                  f"  semantics={info['semantics']}")
 
         print("\nQuestion:")
         print(question)
@@ -974,6 +980,13 @@ def main():
     )
 
     parser.add_argument(
+        "--semantics-dir",
+        default="semantics",
+        help="retrieved_schema mode uses <dir>/<data_source>.json aliases "
+             "if present (see semantic_layer.py); pass '' to disable"
+    )
+
+    parser.add_argument(
         "--run-id",
         default=None,
         help="Label for this run (default: <mode>_<timestamp>)"
@@ -1014,7 +1027,9 @@ def main():
 
         query_timeout=args.query_timeout,
 
-        run_id=args.run_id
+        run_id=args.run_id,
+
+        semantics_dir=args.semantics_dir
     )
 
 
