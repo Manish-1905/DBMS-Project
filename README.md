@@ -19,6 +19,11 @@ question (+ schema) ──► llama.cpp LLM ──► Cypher ──► Neo4j (re
 | `tests/` | `uv run pytest`: schema versioning, type names, gold-schema parser, retriever, semantic layer |
 | `eval_retrieval.py` | **Part 4.4.** Benchmarks the retriever on its own (recall, Recall@k, MRR, context reduction); no LLM or Neo4j needed |
 | `embedder.py` | **Part 4.2.** Embedding model for the `embed` / `hybrid` retrievers (fastembed, no PyTorch) |
+| `value_index.py` | **Part 5.2.** Catalog of every text value in the live graph (`values/<graph>.json`) with a `state_version` |
+| `grounding.py` | **Part 5.1–5.2.** Maps what the question says to stored values: exact / case / stem / alias / typo / fuzzy, with context checks |
+| `make_value_variants.py` | **Part 5.4.** Value-grounding benchmark: lowercase, unquoted, typo, partial-title and alias rewrites of ER questions |
+| `eval_grounding.py` | **Part 5.6.** Grounding accuracy per variant (no LLM) |
+| `graph_state.py` | **Part 5.5.** Copies the graph to a new database with recoded values (`'Female'`→`'F'` ...) and rewrites the gold queries |
 | `distractors.py` | **Part 4.5.** Adds fake-but-plausible labels/relationships to a schema at a chosen noise level |
 | `eval_distractors.py` | **Part 4.5.** Retrieval quality vs noise level, per retrieval method |
 | `Benchmark/MTQ-Auto/test.parquet` | MTQ questions (`question`, `schema`, `cypher`, `data_source`, ...) |
@@ -228,6 +233,47 @@ Results: `results/step4_er_retrieval.md`.
 
 Per-graph and per-query-type rows are printed by the script. The `missing`
 column in the CSV shows what the retriever dropped; use it to improve it.
+
+## 9. Entity and value grounding (Part 5)
+
+`--mode grounded` = retrieved schema + the graph values the question refers to
+("female" → `User.gender = 'Female'`), added to the prompt.
+
+```bash
+uv run value_index.py --neo4j-database $DB --out values/er.json        # value catalog
+uv run grounding.py --values values/er.json "female users from ohio"   # try it
+uv run eval_grounding.py --values values/er.json                       # 5.4 benchmark, no LLM
+```
+
+LLM runs on the value-variant benchmark (`Benchmark/MTQ-Auto/value_variants_er.parquet`,
+frozen; regenerate only with `make_value_variants.py`):
+
+```bash
+uv run main.py --parquet Benchmark/MTQ-Auto/value_variants_er.parquet --neo4j-database $DB \
+  --mode retrieved_schema --sample 300 --sqlite grounding.sqlite
+uv run main.py --parquet Benchmark/MTQ-Auto/value_variants_er.parquet --neo4j-database $DB \
+  --mode grounded --sample 300 --sqlite grounding.sqlite
+uv run evaluate.py --sqlite grounding.sqlite --compare retrieved_schema grounded
+```
+
+### Graph-state experiment (Part 5.5)
+
+Same questions and schema, but the stored values change. See `graph_state.py` for states B and C.
+
+```bash
+uv run graph_state.py create --source $DB --target erstateb --state B   # copy + recode (original untouched)
+uv run value_index.py --neo4j-database erstateb --out values/er_stateB.json
+uv run graph_state.py rewrite-gold --state B --affected-only \
+  --out Benchmark/MTQ-Auto/test-split-stateB.parquet
+uv run main.py --parquet Benchmark/MTQ-Auto/test-split-stateB.parquet --neo4j-database erstateb \
+  --mode retrieved_schema --sqlite state.sqlite
+uv run main.py --parquet Benchmark/MTQ-Auto/test-split-stateB.parquet --neo4j-database erstateb \
+  --mode grounded --values-file values/er_stateB.json --sqlite state.sqlite
+uv run evaluate.py --sqlite state.sqlite --compare retrieved_schema grounded
+```
+
+`evaluate.py` now also reports `empty`: queries that ran but returned no rows, the
+typical symptom of a wrong value.
 
 ## Safety notes
 
