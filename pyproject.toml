@@ -1,7 +1,7 @@
 [project]
 name = "dbms-project"
 version = "0.1.0"
-description = "Add your description here"
+description = "ConText2Cypher: graph-aware natural language to Cypher"
 readme = "README.md"
 authors = [
     { name = "Triman Singh", email = "trimantuteja@gmail.com" }
@@ -15,9 +15,6 @@ dependencies = [
     "requests>=2.34.2",
 ]
 
-[project.scripts]
-dbms-project = "dbms_project:main"
-
-[build-system]
-requires = ["uv_build>=0.12.23,<0.13.0"]
-build-backend = "uv_build"
+# This is a folder of scripts, not an installable package.
+[tool.uv]
+package = false
