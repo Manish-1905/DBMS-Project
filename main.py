@@ -15,6 +15,8 @@ from neo4j import GraphDatabase, Query, READ_ACCESS
 from schema_retriever import retrieve as retrieve_schema
 from semantic_layer import load_semantics, merge, rule_semantics
 from distractors import add_distractors
+from grounding import Grounder, prompt_text as grounding_prompt
+from value_index import load_catalog
 
 
 # ============================================================
@@ -40,8 +42,10 @@ DEFAULT_QUERY_TIMEOUT = 30
 #   full_schema -> System 1 / B : question + full graph schema
 #   retrieved_schema -> System 2 : question + only the relevant part of
 #                       the schema (see schema_retriever.py)
+#   grounded         -> System 3 : retrieved schema + the values in the graph
+#                       that the question refers to (see grounding.py)
 # Later parts add new modes here (grounded, ...).
-MODES = ["no_schema", "full_schema", "retrieved_schema"]
+MODES = ["no_schema", "full_schema", "retrieved_schema", "grounded"]
 
 # Bump this whenever you change SYSTEM_PROMPT or build_user_prompt,
 # so results from different prompts are never mixed up.
@@ -182,7 +186,8 @@ def initialize_sqlite(db_path: str):
 # LLAMA.CPP
 # ============================================================
 
-def build_user_prompt(question: str, schema: str, mode: str) -> str:
+def build_user_prompt(question: str, schema: str, mode: str,
+                      grounding: str = "") -> str:
     """
     Build the actual prompt sent to the LLM.
 
@@ -190,6 +195,8 @@ def build_user_prompt(question: str, schema: str, mode: str) -> str:
     full_schema      : question + the full graph schema.
     retrieved_schema : question + the pruned schema (the caller passes the
                        already-pruned schema in `schema`).
+    grounded         : retrieved_schema + a block listing the graph values
+                       the question refers to (`grounding`).
     """
 
     if mode == "no_schema":
@@ -201,10 +208,12 @@ Generate the Cypher query according to the instructions.
 Return JSON only.
 """
 
+    values_block = f"\n{grounding}\n" if (mode == "grounded" and grounding) else ""
+
     return f"""
 Graph Schema:
 {schema}
-
+{values_block}
 Question:
 {question}
 
@@ -265,6 +274,7 @@ def generate_cypher(
     question: str,
     schema: str,
     mode: str = "full_schema",
+    grounding: str = "",
     temperature: float = 0.0,
     max_tokens: int = 1024,
     timeout: int = 300,
@@ -281,7 +291,8 @@ def generate_cypher(
     user_prompt = build_user_prompt(
         question=question,
         schema=schema,
-        mode=mode
+        mode=mode,
+        grounding=grounding
     )
 
     payload = {
@@ -594,22 +605,41 @@ def run_benchmark(
     embed_model: str = "BAAI/bge-small-en-v1.5",
     embed_margin: float = 0.1,
     sample: Optional[int] = None,
-    sample_seed: int = 0
+    sample_seed: int = 0,
+    values_file: Optional[str] = None
 ):
 
     if run_id is None:
         tag = mode
-        if mode == "retrieved_schema" and retriever != "bm25":
+        if mode in ("retrieved_schema", "grounded") and retriever != "bm25":
             tag += f"-{retriever}"
         if distractor_share and mode != "no_schema":
             tag += f"_noise{int(round(distractor_share * 100))}"
         run_id = f"{tag}_{time.strftime('%Y%m%d_%H%M%S')}"
 
     embedder = None
-    if mode == "retrieved_schema" and retriever != "bm25":
+    if mode in ("retrieved_schema", "grounded") and retriever != "bm25":
         from embedder import get_embedder
         embedder = get_embedder(embed_model)
     noisy_cache = {}
+
+    # Part 5: value catalog(s) for --mode grounded, loaded once per graph.
+    grounders, grounder_states = {}, {}
+
+    def get_grounder(ds):
+        if ds not in grounders:
+            path = values_file or f"values/{ds}.json"
+            if not os.path.exists(path):
+                raise SystemExit(
+                    f"--mode grounded needs a value catalog: {path} not found.\n"
+                    f"Build it with: uv run value_index.py --neo4j-database "
+                    f"<db> --out {path}")
+            cat = load_catalog(path)
+            grounders[ds] = Grounder(cat)
+            grounder_states[ds] = cat.get("state_version")
+            print(f"Value catalog {path}: state_version {cat.get('state_version')}, "
+                  f"database {cat.get('database')}")
+        return grounders[ds]
 
     print("=" * 70)
     print("TEXT-TO-CYPHER BENCHMARK")
@@ -731,7 +761,8 @@ def run_benchmark(
 
         # What schema the LLM actually sees depends on the mode.
         retrieved_context = None
-        if mode == "retrieved_schema":
+        grounding_block = ""
+        if mode in ("retrieved_schema", "grounded"):
             pruned, info = retrieve_schema(
                 question, schema,
                 semantics=semantics,
@@ -741,10 +772,20 @@ def run_benchmark(
             )
             info["distractor_share"] = distractor_share
             schema = json.dumps(pruned)
-            retrieved_context = json.dumps(info)
             print("\nRetrieved schema elements:")
             print(f"  labels={info['labels']}  rels={info['rels']}"
                   f"  semantics={info['semantics']}  method={retriever}")
+            if mode == "grounded":
+                grounder = get_grounder(dataset)
+                grounded = grounder.ground(question, schema_labels=set(info["labels"]))
+                grounding_block = grounding_prompt(grounded)
+                info["grounding"] = grounded
+                info["values_state"] = grounder_states.get(dataset)
+                print("\nGrounded values:")
+                for gv in grounded:
+                    print(f"  \"{gv['surface']}\" -> {gv['property']} = "
+                          f"{gv['value']!r} ({gv['method']}, {gv['score']})")
+            retrieved_context = json.dumps(info)
         elif distractor_share and mode == "full_schema":
             retrieved_context = json.dumps({"distractor_share": distractor_share,
                                             "seed": distractor_seed})
@@ -768,7 +809,8 @@ def run_benchmark(
                 model_name=model_name,
                 question=question,
                 schema=schema,
-                mode=mode
+                mode=mode,
+                grounding=grounding_block
             )
 
             llm_cypher = generated["cypher"]
@@ -1031,6 +1073,13 @@ def main():
 
     parser.add_argument("--sample-seed", type=int, default=0)
 
+    parser.add_argument(
+        "--values-file",
+        default=None,
+        help="--mode grounded: value catalog from value_index.py "
+             "(default values/<data_source>.json)"
+    )
+
     # Experiment settings
 
     parser.add_argument(
@@ -1039,7 +1088,8 @@ def main():
         default="full_schema",
         help="no_schema = LLM only (System 0), "
              "full_schema = LLM + full schema (System 1), "
-             "retrieved_schema = LLM + retrieved schema (System 2)"
+             "retrieved_schema = LLM + retrieved schema (System 2), "
+             "grounded = retrieved schema + graph values (System 3)"
     )
 
     parser.add_argument(
@@ -1141,7 +1191,9 @@ def main():
 
         sample=args.sample,
 
-        sample_seed=args.sample_seed
+        sample_seed=args.sample_seed,
+
+        values_file=args.values_file
     )
 
 
