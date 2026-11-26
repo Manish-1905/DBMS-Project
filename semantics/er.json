@@ -4,16 +4,17 @@
   "semantics_version": "v1",
   "sources": [
     "rules",
-    "llm"
+    "llm",
+    "overrides"
   ],
   "labels": {
     "Genre": {
       "description": "A genre of movies.",
       "aliases": [
-        "genres",
-        "type",
         "category",
-        "classification"
+        "categories",
+        "classification",
+        "genres"
       ]
     },
     "IpAddress": {
@@ -32,15 +33,20 @@
         "movies",
         "film",
         "movie title",
-        "movie id"
+        "movie id",
+        "movie year"
       ]
     },
     "User": {
-      "description": "A user in the system, identified by a unique ID.",
+      "description": "A user in the search system.",
       "aliases": [
         "users",
         "person",
-        "account"
+        "account",
+        "viewer",
+        "viewers",
+        "customer",
+        "people"
       ]
     }
   },
@@ -55,8 +61,9 @@
     "USES": {
       "description": "A relationship between a user and their IP address.",
       "aliases": [
-        "connection",
-        "interaction"
+        "uses ip",
+        "logged in from",
+        "connects from"
       ]
     },
     "WATCHED": {
@@ -84,87 +91,80 @@
         "host"
       ]
     },
-    "Movie.year": {
-      "description": "The year the movie was released.",
-      "aliases": [
-        "release year",
-        "release date"
-      ]
-    },
     "Movie.movieId": {
-      "description": "The unique identifier for the movie.",
+      "description": "A unique identifier for the movie.",
       "aliases": [
         "movie id",
         "id",
-        "identifier"
+        "movie number"
       ]
     },
     "Movie.title": {
       "description": "The title of the movie.",
       "aliases": [
         "name",
-        "title of movie"
+        "movie name"
       ]
     },
-    "User.phone": {
-      "description": "The user's phone number.",
+    "Movie.year": {
+      "description": "The year the movie was released.",
       "aliases": [
-        "contact",
-        "number",
-        "contact info"
+        "release year",
+        "release date",
+        "year released"
       ]
     },
-    "User.email": {
-      "description": "The user's email address.",
+    "User.userId": {
+      "description": "A unique identifier for the user.",
       "aliases": [
-        "contact",
-        "address"
+        "user id",
+        "id",
+        "user_id"
+      ]
+    },
+    "User.state": {
+      "description": "The state where the user resides.",
+      "aliases": [
+        "location",
+        "location_state"
+      ]
+    },
+    "User.firstName": {
+      "description": "The first name of the user.",
+      "aliases": [
+        "first name",
+        "first_name"
       ]
     },
     "User.lastName": {
-      "description": "The user's last name.",
+      "description": "The last name of the user.",
       "aliases": [
         "last name",
-        "surname",
-        "last",
-        "family"
+        "last_name"
       ]
     },
     "User.gender": {
-      "description": "The user's gender.",
+      "description": "The gender of the user.",
       "aliases": [
         "sex"
       ]
     },
+    "User.email": {
+      "description": "The email address of the user.",
+      "aliases": [
+        "email_address"
+      ]
+    },
+    "User.phone": {
+      "description": "The phone number of the user.",
+      "aliases": [
+        "phone_number"
+      ]
+    },
     "User.country": {
-      "description": "The user's country.",
+      "description": "The country where the user resides.",
       "aliases": [
-        "location",
-        "origin"
-      ]
-    },
-    "User.state": {
-      "description": "The user's state.",
-      "aliases": [
-        "location",
-        "region"
-      ]
-    },
-    "User.firstName": {
-      "description": "The user's first name.",
-      "aliases": [
-        "first name",
-        "name",
-        "first",
-        "given"
-      ]
-    },
-    "User.userId": {
-      "description": "The unique identifier for the user.",
-      "aliases": [
-        "user id",
-        "id",
-        "account id"
+        "country_code"
       ]
     },
     "WATCHED.watchCount": {
