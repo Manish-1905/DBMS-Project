@@ -19,3 +19,4 @@ neo4j/
 schemas/
 Datasets/*.dump
 .pytest_cache/
+.DS_Store
