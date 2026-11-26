@@ -38,22 +38,39 @@ def _split_ident(name):
 
 
 def _stem(tok):
-    """Very small stemmer so 'movies'~'movie', 'watched'~'watch'."""
-    for suf in ("ies", "ing", "ed", "es", "s"):
-        if len(tok) > len(suf) + 2 and tok.endswith(suf):
-            tok = tok[: -len(suf)] + ("y" if suf == "ies" else "")
+    """
+    Tiny stemmer: maps singular/plural/verb forms to one key, e.g.
+    movie/movies -> movi, genre/genres -> genr, category/categories -> categori,
+    watch/watched/watches/watching -> watch, address/addresses -> address.
+    """
+    t = tok
+    for suf in ("ing", "ed"):
+        if len(t) > len(suf) + 2 and t.endswith(suf):
+            t = t[: -len(suf)]
             break
-    return tok
+    else:
+        if len(t) > 3 and t.endswith("s") and not t.endswith("ss"):
+            t = t[:-1]
+    if len(t) > 3 and t.endswith("ie"):
+        t = t[:-1]
+    elif len(t) > 3 and t.endswith("y"):
+        t = t[:-1] + "i"
+    if len(t) > 3 and t.endswith("e"):
+        t = t[:-1]
+    return t
 
 
-def tokens(text):
-    return [_stem(t) for t in _split_ident(text)]
+def tokens(text, drop_stopwords=False):
+    words = _split_ident(text)
+    if drop_stopwords:
+        words = [w for w in words if w not in STOPWORDS]
+    return [_stem(w) for w in words]
 
 
 STOPWORDS = {
     "the", "a", "an", "of", "in", "on", "for", "to", "and", "or", "by", "with",
     "what", "which", "who", "how", "many", "much", "are", "is", "was", "were",
-    "do", "doe", "did", "have", "has", "that", "this", "each", "all", "any",
+    "do", "does", "did", "have", "has", "that", "this", "each", "all", "any",
     "list", "show", "find", "give", "return", "number", "count", "top", "most",
     "from", "at", "be", "their", "there", "than", "more", "less", "name",
 }
@@ -127,30 +144,52 @@ def _shortest_path(adj, src, dst, max_hops=3):
     return None
 
 
-def retrieve(question, schema, k_labels=3, k_rels=3, prop_weight=0.5):
+def _sem_tokens(semantics, section, name, use_descriptions=False):
+    """Alias (and optionally description) tokens from the semantic layer."""
+    if not semantics:
+        return [], []
+    entry = semantics.get(section, {}).get(name) or {}
+    alias_toks = [t for a in entry.get("aliases", [])
+                  for t in tokens(a, drop_stopwords=True)]
+    desc_toks = (tokens(entry.get("description", ""), drop_stopwords=True)
+                 if use_descriptions else [])
+    return alias_toks, desc_toks
+
+
+def retrieve(question, schema, k_labels=3, k_rels=3, prop_weight=0.5,
+             semantics=None, use_descriptions=False):
     """
     Return (pruned_schema_dict, info) where info lists what was selected.
+
+    semantics: optional dict from semantic_layer.py (aliases/descriptions);
+               aliases count almost like the element's own name.
     """
     s = _parse(schema)
     node_props = s.get("node_props", {})
     rel_props = s.get("rel_props", {})
     rels = s.get("relationships", [])
 
-    q = [t for t in tokens(question) if t not in STOPWORDS]
+    q = tokens(question, drop_stopwords=True)
 
     # ---- 1. score labels ----
     labels = list(node_props.keys() | {r["start"] for r in rels} | {r["end"] for r in rels})
     label_docs = []
+    label_name_toks = {}
     for L in labels:
         name_toks = tokens(L)
-        prop_toks = [t for p in node_props.get(L, []) for t in tokens(p["property"])]
+        alias_toks, desc_toks = _sem_tokens(semantics, "labels", L, use_descriptions)
+        prop_toks = []
+        for p in node_props.get(L, []):
+            prop_toks += tokens(p["property"])
+            prop_toks += _sem_tokens(semantics, "properties", f"{L}.{p['property']}")[0]
+        label_name_toks[L] = set(name_toks) | set(alias_toks)
         # repeat name tokens so a name hit outweighs a property hit
-        label_docs.append(name_toks * 3 + prop_toks)
+        label_docs.append(name_toks * 3 + alias_toks * 2 + desc_toks + prop_toks)
     bm_l = BM25(label_docs)
     lab_scores = {L: bm_l.score(q, i) for i, L in enumerate(labels)}
-    # property hits only add a damped bonus
+    # property hits only add a damped bonus (an alias hit counts as a name hit)
     for i, L in enumerate(labels):
-        name_hit = any(t in q for t in tokens(L))
+        name_hit = any(t in q for t in label_name_toks[L])
         if not name_hit:
             lab_scores[L] *= prop_weight
 
@@ -158,7 +197,8 @@ def retrieve(question, schema, k_labels=3, k_rels=3, prop_weight=0.5):
     rtypes = sorted({r["type"] for r in rels})
     rel_docs = []
     for T in rtypes:
-        toks = tokens(T) * 3
+        alias_toks, desc_toks = _sem_tokens(semantics, "relationships", T, use_descriptions)
+        toks = tokens(T) * 3 + alias_toks * 2 + desc_toks
         toks += [t for p in rel_props.get(T, []) for t in tokens(p["property"])]
         rel_docs.append(toks)
     bm_r = BM25(rel_docs) if rel_docs else None
@@ -168,7 +208,8 @@ def retrieve(question, schema, k_labels=3, k_rels=3, prop_weight=0.5):
     top_r = [T for T, sc in sorted(rel_scores.items(), key=lambda x: -x[1]) if sc > 0][:k_rels]
 
     if not top_l and not top_r:
-        return s, {"fallback": True, "labels": sorted(labels), "rels": rtypes}
+        return s, {"fallback": True, "labels": sorted(labels), "rels": rtypes,
+                   "semantics": bool(semantics)}
 
     keep_l, keep_r = set(top_l), set(top_r)
     for r in rels:
@@ -204,6 +245,7 @@ def retrieve(question, schema, k_labels=3, k_rels=3, prop_weight=0.5):
     }
     return pruned, {
         "fallback": False,
+        "semantics": bool(semantics),
         "labels": sorted(keep_l),
         "rels": sorted(keep_r),
         "label_scores": {L: round(lab_scores[L], 3) for L in top_l},

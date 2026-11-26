@@ -12,6 +12,7 @@ smaller the context got.
     uv run eval_retrieval.py --data-source er
     uv run eval_retrieval.py                       # all graphs
     uv run eval_retrieval.py --k-labels 5 --csv retrieval_rows.csv
+    uv run eval_retrieval.py --semantics-dir semantics   # with the semantic layer
 """
 
 import argparse
@@ -23,6 +24,7 @@ import pandas as pd
 
 from gold_schema import gold_schema_set
 from schema_retriever import retrieve
+from semantic_layer import load_semantics
 
 
 def schema_sets(schema):
@@ -45,6 +47,10 @@ def main():
     p.add_argument("--data-source", default=None)
     p.add_argument("--k-labels", type=int, default=3)
     p.add_argument("--k-rels", type=int, default=3)
+    p.add_argument("--semantics-dir", default=None,
+                   help="use semantics/<data_source>.json aliases (e.g. semantics)")
+    p.add_argument("--use-descriptions", action="store_true",
+                   help="also match words from the descriptions")
     p.add_argument("--csv", help="write per-question rows here")
     a = p.parse_args()
 
@@ -52,14 +58,20 @@ def main():
     if a.data_source:
         df = df[df["data_source"] == a.data_source]
 
+    sem_cache = {}
     rows = []
     for _, r in df.iterrows():
+        ds = r["data_source"]
+        if ds not in sem_cache:
+            sem_cache[ds] = load_semantics(ds, a.semantics_dir)
         full = schema_sets(r["schema"])
         gold = gold_schema_set(r["cypher"])
         # only score elements that really exist in the schema (drops parser noise)
         gold = {k: gold[k] & full[k] for k in gold}
         pruned, info = retrieve(r["question"], r["schema"],
-                                k_labels=a.k_labels, k_rels=a.k_rels)
+                                k_labels=a.k_labels, k_rels=a.k_rels,
+                                semantics=sem_cache[ds],
+                                use_descriptions=a.use_descriptions)
         got = schema_sets(pruned)
         rec = {k: recall(gold[k], got[k]) for k in gold}
         rows.append({
@@ -99,6 +111,8 @@ def main():
     for k, g in sorted(by_type.items(), key=lambda kv: str(kv[0])):
         print("| " + " | ".join([f"type={k}"] + summarise(g)) + " |")
     print("| " + " | ".join(["ALL"] + summarise(rows)) + " |")
+    used = sorted(ds for ds, sem in sem_cache.items() if sem)
+    print(f"\nSemantic layer used for: {', '.join(used) if used else 'none'}")
 
     if a.csv:
         with open(a.csv, "w", newline="", encoding="utf-8") as f:
