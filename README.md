@@ -17,7 +17,10 @@ question (+ schema) ──► llama.cpp LLM ──► Cypher ──► Neo4j (re
 | `semantic_layer.py` | **Part 3.2.** Descriptions + aliases for every label / relationship / property (rules, local LLM, hand-written overrides) → `semantics/<graph>.json` |
 | `schema_graph.py` | **Part 3.4.** Stores the schema itself as a graph (`NodeType`, `RelationshipType`, `Property`) in a separate Neo4j database |
 | `tests/` | `uv run pytest`: schema versioning, type names, gold-schema parser, retriever, semantic layer |
-| `eval_retrieval.py` | **Part 4.4.** Benchmarks the retriever on its own (recall, context reduction); no LLM or Neo4j needed |
+| `eval_retrieval.py` | **Part 4.4.** Benchmarks the retriever on its own (recall, Recall@k, MRR, context reduction); no LLM or Neo4j needed |
+| `embedder.py` | **Part 4.2.** Embedding model for the `embed` / `hybrid` retrievers (fastembed, no PyTorch) |
+| `distractors.py` | **Part 4.5.** Adds fake-but-plausible labels/relationships to a schema at a chosen noise level |
+| `eval_distractors.py` | **Part 4.5.** Retrieval quality vs noise level, per retrieval method |
 | `Benchmark/MTQ-Auto/test.parquet` | MTQ questions (`question`, `schema`, `cypher`, `data_source`, ...) |
 | `Datasets/*.dump` | Neo4j database dumps, one per graph (not in git, see step 3) |
 
@@ -185,6 +188,36 @@ Results on all 8,284 MTQ test questions (k_labels=3, k_rels=3):
 | v2 (fixed plural/verb matching) | 99.1% | 98.2% | 99.3% | 96.3% | 39.3% |
 
 Compare with the semantic layer: `uv run eval_retrieval.py --semantics-dir semantics`.
+The table also has ranked metrics (label/relationship Recall@k and MRR).
+
+### Retrieval methods (Part 4.2)
+
+`--method bm25` (keywords, default), `embed` (embedding similarity with
+`BAAI/bge-small-en-v1.5` via fastembed; ~130 MB downloaded on first use) or
+`hybrid` (both, fused by reciprocal rank). `--embed-margin` (default 0.1) keeps
+only elements whose similarity is within that of the best match.
+
+### Distractor experiment (Part 4.5)
+
+Pads the schema with fake labels/relationships (only the schema text; Neo4j is
+untouched) at 40/60/80/95% noise and measures retrieval:
+
+```bash
+uv run distractors.py --share 0.8                  # see what gets added
+uv run eval_distractors.py --methods bm25 bm25+sem embed+sem hybrid+sem
+```
+
+With the LLM (full noisy schema vs retrieved schema), e.g. 200 questions at 80% noise:
+
+```bash
+uv run main.py --parquet Benchmark/MTQ-Auto/test-split.parquet --neo4j-database $DB \
+  --mode full_schema --distractor-share 0.8 --end 200 --sqlite noise.sqlite
+uv run main.py --parquet Benchmark/MTQ-Auto/test-split.parquet --neo4j-database $DB \
+  --mode retrieved_schema --distractor-share 0.8 --end 200 --sqlite noise.sqlite
+```
+
+At 95% noise the full schema is ~17k characters: start llama-server with `-c 16384`.
+Results: `results/step4_er_retrieval.md`.
 
 Per-graph and per-query-type rows are printed by the script. The `missing`
 column in the CSV shows what the retriever dropped; use it to improve it.

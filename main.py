@@ -13,7 +13,8 @@ import requests
 from neo4j import GraphDatabase, Query, READ_ACCESS
 
 from schema_retriever import retrieve as retrieve_schema
-from semantic_layer import load_semantics
+from semantic_layer import load_semantics, merge, rule_semantics
+from distractors import add_distractors
 
 
 # ============================================================
@@ -564,11 +565,27 @@ def run_benchmark(
     data_source: Optional[str] = None,
     query_timeout: float = DEFAULT_QUERY_TIMEOUT,
     run_id: Optional[str] = None,
-    semantics_dir: Optional[str] = "semantics"
+    semantics_dir: Optional[str] = "semantics",
+    distractor_share: float = 0.0,
+    distractor_seed: int = 0,
+    retriever: str = "bm25",
+    embed_model: str = "BAAI/bge-small-en-v1.5",
+    embed_margin: float = 0.1
 ):
 
     if run_id is None:
-        run_id = f"{mode}_{time.strftime('%Y%m%d_%H%M%S')}"
+        tag = mode
+        if mode == "retrieved_schema" and retriever != "bm25":
+            tag += f"-{retriever}"
+        if distractor_share and mode != "no_schema":
+            tag += f"_noise{int(round(distractor_share * 100))}"
+        run_id = f"{tag}_{time.strftime('%Y%m%d_%H%M%S')}"
+
+    embedder = None
+    if mode == "retrieved_schema" and retriever != "bm25":
+        from embedder import get_embedder
+        embedder = get_embedder(embed_model)
+    noisy_cache = {}
 
     print("=" * 70)
     print("TEXT-TO-CYPHER BENCHMARK")
@@ -670,18 +687,36 @@ def run_benchmark(
             str(row["query_type"]) if "query_type" in row.index else None
         )
 
+        # Part 4.5: pad the schema with fake labels/relationships. Only the
+        # schema text changes; the graph and the gold query don't.
+        semantics = load_semantics(dataset, semantics_dir)
+        if distractor_share and mode != "no_schema":
+            if schema not in noisy_cache:
+                noisy, _ = add_distractors(schema, distractor_share, distractor_seed)
+                noisy_sem = (merge(rule_semantics(noisy), semantics)
+                             if semantics else None)
+                noisy_cache[schema] = (json.dumps(noisy), noisy_sem)
+            schema, semantics = noisy_cache[schema]
+
         # What schema the LLM actually sees depends on the mode.
         retrieved_context = None
         if mode == "retrieved_schema":
             pruned, info = retrieve_schema(
                 question, schema,
-                semantics=load_semantics(dataset, semantics_dir)
+                semantics=semantics,
+                method=retriever,
+                embedder=embedder,
+                embed_margin=embed_margin
             )
+            info["distractor_share"] = distractor_share
             schema = json.dumps(pruned)
             retrieved_context = json.dumps(info)
             print("\nRetrieved schema elements:")
             print(f"  labels={info['labels']}  rels={info['rels']}"
-                  f"  semantics={info['semantics']}")
+                  f"  semantics={info['semantics']}  method={retriever}")
+        elif distractor_share and mode == "full_schema":
+            retrieved_context = json.dumps({"distractor_share": distractor_share,
+                                            "seed": distractor_seed})
 
         print("\nQuestion:")
         print(question)
@@ -987,6 +1022,27 @@ def main():
     )
 
     parser.add_argument(
+        "--distractor-share",
+        type=float,
+        default=0.0,
+        help="Part 4.5: fraction of the schema that is fake (e.g. 0.8); "
+             "applies to full_schema and retrieved_schema"
+    )
+
+    parser.add_argument("--distractor-seed", type=int, default=0)
+
+    parser.add_argument(
+        "--retriever",
+        choices=["bm25", "embed", "hybrid"],
+        default="bm25",
+        help="retrieved_schema mode: lexical, embedding or hybrid retrieval"
+    )
+
+    parser.add_argument("--embed-model", default="BAAI/bge-small-en-v1.5")
+
+    parser.add_argument("--embed-margin", type=float, default=0.1)
+
+    parser.add_argument(
         "--run-id",
         default=None,
         help="Label for this run (default: <mode>_<timestamp>)"
@@ -1029,7 +1085,17 @@ def main():
 
         run_id=args.run_id,
 
-        semantics_dir=args.semantics_dir
+        semantics_dir=args.semantics_dir,
+
+        distractor_share=args.distractor_share,
+
+        distractor_seed=args.distractor_seed,
+
+        retriever=args.retriever,
+
+        embed_model=args.embed_model,
+
+        embed_margin=args.embed_margin
     )
 
 
