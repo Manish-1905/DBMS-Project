@@ -13,6 +13,9 @@ adapts. To test this, make a COPY of the ER graph whose values are recoded:
   state C ("relabelled") User.state   Ohio        -> OH (postal codes)
                          User.gender  Female/Male -> female/male
                          Movie.title  The Matrix  -> Matrix, The
+  state R (schema change, roadmap 8.4 "G3")
+                         label Genre -> Category, relationship WATCHED -> VIEWED,
+                         property Movie.title -> Movie.name
 
 Steps (the original database is never written to):
 
@@ -66,6 +69,13 @@ STATES = {
     },
 }
 
+# Schema changes (roadmap 8.4, "G3: same domain, changed schema").
+SCHEMA_STATES = {
+    "R": {"labels": {"Genre": "Category"},
+          "rels": {"WATCHED": "VIEWED"},
+          "props": {("Movie", "title"): "name"}},
+}
+
 _ARTICLES = ("The ", "A ", "An ")
 
 
@@ -90,6 +100,8 @@ def transform_value(value, how):
 
 
 def state_mapping(state):
+    if state in SCHEMA_STATES:
+        return {}
     if state not in STATES:
         raise SystemExit(f"unknown state {state!r}; choose from {sorted(STATES)}")
     return {f"{label}.{prop}": how for (label, prop), how in STATES[state].items()}
@@ -117,9 +129,71 @@ def rewrite_cypher(cypher, mapping):
     return "".join(out), changed
 
 
-def rewrite_gold(parquet, out, state, affected_only=False):
+def rename_cypher(cypher, state):
+    """Apply a schema change (labels, relationship types, properties) to a query."""
+    spec = SCHEMA_STATES[state]
+    out = cypher
+    strings = []
+
+    def hide(m):                      # don't touch text inside string literals
+        strings.append(m.group(0))
+        return f"\x00{len(strings) - 1}\x00"
+    out = re.sub(r"'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"", hide, out)
+    for old, new in spec["labels"].items():
+        out = re.sub(rf"(:\s*)`?{old}`?(?![\w`])", rf"\g<1>{new}", out)
+    for old, new in spec["rels"].items():
+        out = re.sub(rf"(\[[^\]]*?:\s*(?:[\w`]+\s*\|\s*:?\s*)*)`?{old}`?(?![\w`])",
+                     rf"\g<1>{new}", out)
+        out = re.sub(rf"(\|\s*:?\s*)`?{old}`?(?![\w`])", rf"\g<1>{new}", out)
+    from gold_schema import _var_map
+    varmap = _var_map(out)
+    for (label, old), new in spec["props"].items():
+        new_label = spec["labels"].get(label, label)
+        vars_ = [v for v, ls in varmap.items() if new_label in ls]
+        for v in vars_:
+            out = re.sub(rf"\b{re.escape(v)}\s*\.\s*`?{old}`?\b", f"{v}.{new}", out)
+        # inline maps in node patterns of that label: (m:Movie {title: ...})
+        out = re.sub(rf"(\(\s*\w*\s*:\s*{new_label}\b[^)]*?[{{,]\s*)`?{old}`?(\s*:)",
+                     rf"\g<1>{new}\g<2>", out)
+    return re.sub(r"\x00(\d+)\x00", lambda m: strings[int(m.group(1))], out)
+
+
+def rename_schema(schema_text, state):
+    spec = SCHEMA_STATES[state]
+    s = json.loads(schema_text)
+    lab = lambda x: spec["labels"].get(x, x)
+    rel = lambda x: spec["rels"].get(x, x)
+    node_props = {}
+    for L, ps in s.get("node_props", {}).items():
+        node_props[lab(L)] = [{**p, "property": spec["props"].get((L, p["property"]),
+                                                                  p["property"])} for p in ps]
+    return json.dumps({
+        "node_props": node_props,
+        "rel_props": {rel(T): ps for T, ps in s.get("rel_props", {}).items()},
+        "relationships": [{"start": lab(r["start"]), "type": rel(r["type"]),
+                           "end": lab(r["end"])} for r in s.get("relationships", [])],
+    })
+
+
+def rewrite_gold(parquet, out, state, affected_only=False, keep_schema=False):
     import pandas as pd
     df = pd.read_parquet(parquet)
+    if state in SCHEMA_STATES:
+        df["original_cypher"] = df["cypher"]
+        df["cypher"] = [rename_cypher(c, state) for c in df["cypher"]]
+        df["affected"] = df["cypher"] != df["original_cypher"]
+        if not keep_schema:
+            df["schema"] = [rename_schema(x, state) for x in df["schema"]]
+        df["graph_state"] = state
+        if affected_only:
+            df = df[df["affected"]].reset_index(drop=True)
+        df.to_parquet(out, index=False)
+        print(f"state {state}: {int(df['affected'].sum())} of {len(df)} gold queries changed; "
+              f"schema in the file: {'OLD (outdated)' if keep_schema else 'NEW (current)'}")
+        for _, r in df[df["affected"]].head(3).iterrows():
+            print(f"  {r['original_cypher'][:110]}\n  -> {r['cypher'][:110]}\n")
+        print(f"written to {out}")
+        return
     mapping = state_mapping(state)
     res = [rewrite_cypher(c, mapping) for c in df["cypher"]]
     df["original_cypher"] = df["cypher"]
@@ -219,6 +293,35 @@ def recode(driver, target, state):
     return counts
 
 
+def rename_in_db(driver, target, state, batch=5000):
+    """Apply a schema change in `target` (labels, relationship types, properties)."""
+    spec = SCHEMA_STATES[state]
+    done = {}
+
+    def loop(cypher, **kw):
+        total = 0
+        while True:
+            c = driver.execute_query(cypher, database_=target, b=batch, **kw).records[0]["c"]
+            total += c
+            if c == 0:
+                return total
+    for old, new in spec["labels"].items():
+        done[f"label {old}->{new}"] = loop(
+            f"MATCH (n:{_q(old)}) WITH n LIMIT $b SET n:{_q(new)} REMOVE n:{_q(old)} "
+            f"RETURN count(n) AS c")
+    for old, new in spec["rels"].items():
+        done[f"rel {old}->{new}"] = loop(
+            f"MATCH (a)-[r:{_q(old)}]->(b) WITH a, r, b LIMIT $b "
+            f"CREATE (a)-[r2:{_q(new)}]->(b) SET r2 = properties(r) DELETE r "
+            f"RETURN count(r2) AS c")
+    for (label, old), new in spec["props"].items():
+        L = _q(spec["labels"].get(label, label))
+        done[f"prop {label}.{old}->{new}"] = loop(
+            f"MATCH (n:{L}) WHERE n.{_q(old)} IS NOT NULL WITH n LIMIT $b "
+            f"SET n.{_q(new)} = n.{_q(old)} REMOVE n.{_q(old)} RETURN count(n) AS c")
+    return done
+
+
 def create(a):
     if not a.neo4j_password:
         raise SystemExit("No Neo4j password. Set NEO4J_PASSWORD or pass --neo4j-password.")
@@ -249,8 +352,12 @@ def create(a):
         print(f"copying '{a.source}' -> '{a.target}' ...")
         n, r = clone(driver, a.source, a.target)
         print(f"  {n} nodes, {r} relationships copied")
-        counts = recode(driver, a.target, a.state)
-        print(f"recoded for state {a.state}: " + json.dumps(counts))
+        if a.state in SCHEMA_STATES:
+            counts = rename_in_db(driver, a.target, a.state)
+            print(f"schema changed for state {a.state}: " + json.dumps(counts))
+        else:
+            counts = recode(driver, a.target, a.state)
+            print(f"recoded for state {a.state}: " + json.dumps(counts))
         print(f"next: uv run value_index.py --neo4j-database {a.target} "
               f"--out values/er_state{a.state}.json")
     finally:
@@ -264,7 +371,7 @@ def main():
     c = sub.add_parser("create", help="copy the graph to a new database and recode it")
     c.add_argument("--source", default=os.environ.get("DB", "neo4j"))
     c.add_argument("--target", required=True, help="new database, e.g. erstateb")
-    c.add_argument("--state", required=True, choices=sorted(STATES))
+    c.add_argument("--state", required=True, choices=sorted(STATES) + sorted(SCHEMA_STATES))
     c.add_argument("--no-create", action="store_true",
                    help="the target database already exists (created by hand)")
     c.add_argument("--replace", action="store_true", help="wipe a non-empty target first")
@@ -273,7 +380,9 @@ def main():
     c.add_argument("--neo4j-password", default=os.environ.get("NEO4J_PASSWORD", ""))
 
     g = sub.add_parser("rewrite-gold", help="rewrite gold queries for a state")
-    g.add_argument("--state", required=True, choices=sorted(STATES))
+    g.add_argument("--state", required=True, choices=sorted(STATES) + sorted(SCHEMA_STATES))
+    g.add_argument("--keep-schema", action="store_true",
+                   help="schema states: keep the OLD schema text (an outdated system)")
     g.add_argument("--parquet", default="Benchmark/MTQ-Auto/test-split.parquet")
     g.add_argument("--out", required=True)
     g.add_argument("--affected-only", action="store_true",
@@ -283,7 +392,7 @@ def main():
     if a.cmd == "create":
         create(a)
     else:
-        rewrite_gold(a.parquet, a.out, a.state, a.affected_only)
+        rewrite_gold(a.parquet, a.out, a.state, a.affected_only, a.keep_schema)
 
 
 if __name__ == "__main__":
