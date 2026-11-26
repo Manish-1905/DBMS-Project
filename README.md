@@ -28,6 +28,7 @@ question (+ schema) ──► llama.cpp LLM ──► Cypher ──► Neo4j (re
 | `cypher_guard.py` | **Part 7.1–7.5.** Policy (read-only, bounded), schema (labels, relationships, direction, properties, types) and value checks, EXPLAIN, budgeted execution, repair feedback |
 | `error_taxonomy.py` | **Part 7.6.** Labels every wrong answer of any run with F1–F14 |
 | `security_bench.py` | **Part 7.8.** Harmful Cypher / harmful questions must be rejected by the policy layer |
+| `final_report.py` | **Part 8.** One table for all systems on the same questions: syntax/schema/entity/execution/result accuracy, empty rate, repair, selective answering, latency, tokens, paired tests |
 | `distractors.py` | **Part 4.5.** Adds fake-but-plausible labels/relationships to a schema at a chosen noise level |
 | `eval_distractors.py` | **Part 4.5.** Retrieval quality vs noise level, per retrieval method |
 | `Benchmark/MTQ-Auto/test.parquet` | MTQ questions (`question`, `schema`, `cypher`, `data_source`, ...) |
@@ -323,6 +324,37 @@ uv run security_bench.py --neo4j-database $DB                 # or --offline
 
 `--repair 0` checks without repairing; `--no-repair-empty` stops "no rows" from
 counting as a failure.
+
+## 12. Final evaluation (Part 8)
+
+```bash
+uv run final_report.py \
+  --run S0=results.sqlite:no_schema --run S1=results.sqlite:full_schema \
+  --run S2=results.sqlite:retrieved_schema --run S3=plan.sqlite:grounded \
+  --run S5=plan.sqlite:ir --run S7=repair.sqlite:grounded_repair2 \
+  --out results/final_table.md
+```
+
+Only questions answered by every listed run are used, so all systems are compared
+on the same questions. New runs also record LLM tokens (`prompt_tokens`,
+`completion_tokens` columns).
+
+### Schema-change experiment (roadmap 8.4, "G3")
+
+`graph_state.py` state `R` renames `Genre`→`Category`, `WATCHED`→`VIEWED`,
+`Movie.title`→`Movie.name` in a copy of the graph. Compare a system that still
+believes the old schema with one that reads the current schema:
+
+```bash
+uv run graph_state.py create --source $DB --target erschema --state R
+uv run graph_state.py rewrite-gold --state R --affected-only --keep-schema --out Benchmark/MTQ-Auto/test-split-R-stale.parquet
+uv run graph_state.py rewrite-gold --state R --affected-only --out Benchmark/MTQ-Auto/test-split-R-live.parquet
+uv run main.py --parquet Benchmark/MTQ-Auto/test-split-R-stale.parquet --neo4j-database erschema \
+  --mode retrieved_schema --semantics-dir "" --sample 150 --run-id stale_schema --sqlite schema.sqlite
+uv run main.py --parquet Benchmark/MTQ-Auto/test-split-R-live.parquet --neo4j-database erschema \
+  --mode retrieved_schema --semantics-dir "" --sample 150 --run-id live_schema --sqlite schema.sqlite
+uv run evaluate.py --sqlite schema.sqlite --compare stale_schema live_schema
+```
 
 ## Safety notes
 

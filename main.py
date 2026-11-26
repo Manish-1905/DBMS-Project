@@ -154,7 +154,11 @@ CREATE TABLE IF NOT EXISTS benchmark_results (
 
     retrieved_context TEXT,
 
-    attempts TEXT
+    attempts TEXT,
+
+    prompt_tokens INTEGER,
+
+    completion_tokens INTEGER
 
 );
 """
@@ -169,6 +173,8 @@ NEW_COLUMNS = {
     "query_type": "TEXT",
     "retrieved_context": "TEXT",
     "attempts": "TEXT",
+    "prompt_tokens": "INTEGER",
+    "completion_tokens": "INTEGER",
 }
 
 
@@ -278,6 +284,16 @@ def extract_json(text: str) -> Dict[str, Any]:
     )
 
 
+# Tokens used by the LLM calls of the current question (Part 8: avg tokens).
+TOKENS = {"prompt": 0, "completion": 0}
+
+
+def _count_tokens(data):
+    usage = (data or {}).get("usage") or {}
+    TOKENS["prompt"] += int(usage.get("prompt_tokens") or 0)
+    TOKENS["completion"] += int(usage.get("completion_tokens") or 0)
+
+
 def call_llm_json(llama_url, model_name, system, user, temperature=0.0,
                   max_tokens=1024, timeout=300):
     """One chat call that must return JSON -> (parsed dict or None, raw, seconds)."""
@@ -293,7 +309,9 @@ def call_llm_json(llama_url, model_name, system, user, temperature=0.0,
     response = requests.post(llama_url, json=payload, timeout=timeout)
     seconds = time.perf_counter() - t0
     response.raise_for_status()
-    raw = response.json()["choices"][0]["message"]["content"]
+    data = response.json()
+    _count_tokens(data)
+    raw = data["choices"][0]["message"]["content"]
     try:
         return extract_json(raw), raw, seconds
     except ValueError:
@@ -453,6 +471,7 @@ def generate_cypher(
 
     data = response.json()
 
+    _count_tokens(data)
     raw_content = data["choices"][0]["message"]["content"]
 
     try:
@@ -620,10 +639,12 @@ INSERT INTO benchmark_results (
     raw_response,
     query_type,
     retrieved_context,
-    attempts
+    attempts,
+    prompt_tokens,
+    completion_tokens
 
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 """
 
 
@@ -646,7 +667,9 @@ def save_result(
     raw_response=None,
     query_type=None,
     retrieved_context=None,
-    attempts=None
+    attempts=None,
+    prompt_tokens=None,
+    completion_tokens=None
 ):
 
     conn.execute(
@@ -673,7 +696,9 @@ def save_result(
             raw_response,
             query_type,
             retrieved_context,
-            attempts
+            attempts,
+            prompt_tokens,
+            completion_tokens
         )
     )
 
@@ -883,6 +908,7 @@ def run_benchmark(
         )
         print("=" * 70)
 
+        TOKENS["prompt"] = TOKENS["completion"] = 0
         question = str(row["question"])
         schema = str(row["schema"])
         real_schema = schema
@@ -1152,7 +1178,11 @@ def run_benchmark(
 
             retrieved_context=retrieved_context,
 
-            attempts=json.dumps(attempts, default=str) if attempts is not None else None
+            attempts=json.dumps(attempts, default=str) if attempts is not None else None,
+
+            prompt_tokens=TOKENS["prompt"],
+
+            completion_tokens=TOKENS["completion"]
         )
 
         print("\nSaved to SQLite.")
