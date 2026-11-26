@@ -27,18 +27,24 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 
 from neo4j import GraphDatabase, READ_ACCESS
 
 
-# Neo4j property type names -> the names used in MTQ / LangChain schemas
+# Neo4j property type names -> the names used in MTQ / LangChain schemas.
+# Older Neo4j 5 versions report Java-style names ("String", "Long",
+# "StringArray"); newer ones report Cypher types ("STRING NOT NULL",
+# "INTEGER", "LIST<STRING NOT NULL>"). Keys here are upper-case, no spaces.
 TYPE_MAP = {
-    "String": "STRING", "Long": "INTEGER", "Integer": "INTEGER",
-    "Double": "FLOAT", "Float": "FLOAT", "Boolean": "BOOLEAN",
-    "Date": "DATE", "DateTime": "DATE_TIME", "LocalDateTime": "LOCAL_DATE_TIME",
-    "Time": "TIME", "LocalTime": "LOCAL_TIME", "Duration": "DURATION",
-    "Point": "POINT",
+    "STRING": "STRING", "LONG": "INTEGER", "INTEGER": "INTEGER", "INT": "INTEGER",
+    "DOUBLE": "FLOAT", "FLOAT": "FLOAT", "BOOLEAN": "BOOLEAN",
+    "DATE": "DATE", "DATETIME": "DATE_TIME", "ZONEDDATETIME": "DATE_TIME",
+    "ZONED_DATETIME": "DATE_TIME", "LOCALDATETIME": "LOCAL_DATE_TIME",
+    "LOCAL_DATETIME": "LOCAL_DATE_TIME", "TIME": "TIME", "ZONEDTIME": "TIME",
+    "ZONED_TIME": "TIME", "LOCALTIME": "LOCAL_TIME", "LOCAL_TIME": "LOCAL_TIME",
+    "DURATION": "DURATION", "POINT": "POINT",
 }
 
 # Only keep the most common values when a property has this few distinct values.
@@ -49,10 +55,12 @@ TOP_K_VALUES = 20
 def _type(types):
     if not types:
         return "UNKNOWN"
-    t = types[0]
-    if t.endswith("Array"):
+    t = str(types[0]).strip()
+    t = re.sub(r"\s+NOT\s+NULL$", "", t, flags=re.IGNORECASE)
+    u = re.sub(r"\s+", "_", t.upper())
+    if u.endswith("ARRAY") or u.startswith("LIST"):
         return "LIST"
-    return TYPE_MAP.get(t, t.upper())
+    return TYPE_MAP.get(u, u)
 
 
 def _q(name):
