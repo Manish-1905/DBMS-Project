@@ -88,12 +88,31 @@ def load(path):
     return rows
 
 
+def query_features(cypher):
+    """Roadmap Part 6 breakdown of the GOLD query: hops and clause types."""
+    u = (cypher or "").upper()
+    hops = len(re.findall(r"-\[[^\]]*\]-|-->|<--", cypher or ""))
+    return {
+        "hops": "0" if hops == 0 else "1" if hops == 1 else "2" if hops == 2 else "3+",
+        "filter": bool(re.search(r"\bWHERE\b|\{\s*\w+\s*:", cypher or "")),
+        "aggregation": bool(re.search(r"\b(COUNT|SUM|AVG|MIN|MAX|COLLECT)\s*\(", u)),
+        "sorting": "ORDER BY" in u or bool(re.search(r"\bLIMIT\b", u)),
+        "multi_stage": bool(re.search(r"\bWITH\b", u)),
+    }
+
+
 def evaluate_row(r):
     llm = json.loads(r["LLM_cypher_result"] or "null") or {}
     gold = json.loads(r["benchmark_cypher_result"] or "null") or {}
     llm_ok = bool(llm.get("success"))
     gold_ok = bool(gold.get("success"))
     ordered = "order by" in normalise_query(r["benchmark_cypher"])
+    ctx = {}
+    try:
+        ctx = json.loads(r.get("retrieved_context") or "null") or {}
+    except (TypeError, ValueError):
+        pass
+    ir = ctx.get("ir") or {}
     return {
         "id": r["id"],
         "run_id": r["run_id"],
@@ -116,6 +135,8 @@ def evaluate_row(r):
         "gold_exec_s": r["benchmark_cypher_latency"] if gold_ok else None,
         "gen_s": r["time_to_generate"],
         "llm_error": llm.get("error"),
+        "ir_status": ir.get("status") or "-",
+        **{f"f_{k}": v for k, v in query_features(r["benchmark_cypher"]).items()},
         "llm_cypher": r["LLM_cypher"],
         "gold_cypher": r["benchmark_cypher"],
     }
@@ -209,6 +230,9 @@ def main():
     p.add_argument("--rows-csv", help="Also write per-question results here")
     p.add_argument("--by-type", action="store_true",
                    help="Also break results down by MTQ query_type")
+    p.add_argument("--by-feature", action="store_true",
+                   help="break results down by hops / filter / aggregation / "
+                        "sorting / multi-stage of the gold query (Part 6)")
     p.add_argument("--compare", nargs=2, metavar=("RUN_A", "RUN_B"),
                    help="paired comparison of two runs (run ids or unique prefixes)")
     args = p.parse_args()
@@ -222,6 +246,14 @@ def main():
     if args.by_type:
         print()
         print_table(rows, ["run_id", "query_type"])
+    if args.by_feature:
+        for f in ("hops", "filter", "aggregation", "sorting", "multi_stage"):
+            print()
+            print_table(rows, ["run_id", f"f_{f}"])
+    ir_rows = [r for r in rows if r["ir_status"] != "-"]
+    if ir_rows:
+        print("\nPlan route (--mode ir): what happened to each question")
+        print_table(ir_rows, ["run_id", "ir_status"])
     if args.compare:
         compare_runs(rows, *args.compare)
 
