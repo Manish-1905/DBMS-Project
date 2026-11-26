@@ -24,6 +24,7 @@ question (+ schema) ──► llama.cpp LLM ──► Cypher ──► Neo4j (re
 | `make_value_variants.py` | **Part 5.4.** Value-grounding benchmark: lowercase, unquoted, typo, partial-title and alias rewrites of ER questions |
 | `eval_grounding.py` | **Part 5.6.** Grounding accuracy per variant (no LLM) |
 | `graph_state.py` | **Part 5.5.** Copies the graph to a new database with recoded values (`'Female'`→`'F'` ...) and rewrites the gold queries |
+| `query_ir.py` | **Part 6.** Query plan (IR) format, schema/value checks with auto-fixes and error messages, compiler to parameterised Cypher |
 | `distractors.py` | **Part 4.5.** Adds fake-but-plausible labels/relationships to a schema at a chosen noise level |
 | `eval_distractors.py` | **Part 4.5.** Retrieval quality vs noise level, per retrieval method |
 | `Benchmark/MTQ-Auto/test.parquet` | MTQ questions (`question`, `schema`, `cypher`, `data_source`, ...) |
@@ -274,6 +275,28 @@ uv run evaluate.py --sqlite state.sqlite --compare retrieved_schema grounded
 
 `evaluate.py` now also reports `empty`: queries that ran but returned no rows, the
 typical symptom of a wrong value.
+
+## 10. Query planning (Part 6)
+
+`--mode ir` (System 4 / E4): the LLM writes a JSON query **plan** instead of Cypher.
+The plan is checked against the schema and the value catalog; certain mistakes
+are fixed automatically (case, relationship direction, `'female'`→`'Female'`),
+the rest go back to the LLM with the reasons (`--ir-retries`, default 1). A valid
+plan is compiled to Cypher by code (always valid syntax, values as parameters).
+Questions the plan format can't express fall back to `grounded` generation.
+
+```bash
+uv run main.py --parquet Benchmark/MTQ-Auto/test-split.parquet --neo4j-database $DB \
+  --mode ir --sample 300 --sqlite plan.sqlite
+uv run main.py --parquet Benchmark/MTQ-Auto/test-split.parquet --neo4j-database $DB \
+  --mode grounded --sample 300 --sqlite plan.sqlite
+uv run evaluate.py --sqlite plan.sqlite --by-feature --compare grounded ir
+```
+
+`--by-feature` breaks results down by the gold query's hops (0/1/2/3+), filter,
+aggregation, sorting and multi-stage (`WITH`). For `ir` runs `evaluate.py` also
+shows what happened to each plan: `ok`, `ok_after_retry`, `invalid`,
+`unsupported`, `parse_error` (the last three used the fallback).
 
 ## Safety notes
 
