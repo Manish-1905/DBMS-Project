@@ -1,0 +1,271 @@
+{
+  "data_source": "covid",
+  "schema_version": "802ff9029111900d",
+  "semantics_version": "v1",
+  "sources": [
+    "rules",
+    "llm"
+  ],
+  "labels": {
+    "Continent": {
+      "description": "A continent is a large geographical area that is separated from other continents by water.",
+      "aliases": [
+        "continents",
+        "region",
+        "country group",
+        "geographical division"
+      ]
+    },
+    "Country": {
+      "description": "A country is a geographical entity that is part of a region and a continent.",
+      "aliases": [
+        "countries",
+        "nation",
+        "geographical area"
+      ]
+    },
+    "Person": {
+      "description": "",
+      "aliases": [
+        "persons"
+      ]
+    },
+    "Place": {
+      "description": "A place where people live or work.",
+      "aliases": [
+        "places",
+        "location",
+        "residence",
+        "dwelling"
+      ]
+    },
+    "Region": {
+      "description": "A geographical region, such as a country, state, or city.",
+      "aliases": [
+        "regions",
+        "area",
+        "country",
+        "state",
+        "city"
+      ]
+    },
+    "Visit": {
+      "description": "A node representing a visit made by a person to a place.",
+      "aliases": [
+        "visits",
+        "visitation",
+        "visitation record"
+      ]
+    },
+    "_Bloom_Perspective_": {
+      "description": "A node representing a Bloom perspective with properties including version, roles, data, name, and ID.",
+      "aliases": [
+        "bloom perspective",
+        "bloom perspectives",
+        "bloom perspective node",
+        "bloom perspective entity"
+      ]
+    }
+  },
+  "relationships": {
+    "LOCATED_AT": {
+      "description": "A relationship indicating where a visit took place.",
+      "aliases": [
+        "located at",
+        "located",
+        "place",
+        "visit location"
+      ]
+    },
+    "PART_OF": {
+      "description": "A relationship between a place and a region, which is a part of a country, which is part of a continent.",
+      "aliases": [
+        "part of",
+        "region of",
+        "country of",
+        "continent of"
+      ]
+    },
+    "PERFORMS_VISIT": {
+      "description": "A relationship indicating that a person performed a visit.",
+      "aliases": [
+        "performs visit",
+        "visits person",
+        "person visits"
+      ]
+    },
+    "VISITS": {
+      "description": "A relationship between a person and a place where the person visited the place.",
+      "aliases": [
+        "visit",
+        "visitation",
+        "visitation relationship"
+      ]
+    }
+  },
+  "properties": {
+    "Continent.name": {
+      "description": "The name of the continent, e.g., Asia, Europe, Africa.",
+      "aliases": [
+        "continent name",
+        "name of continent"
+      ]
+    },
+    "Country.name": {
+      "description": "The name of the country.",
+      "aliases": [
+        "country name"
+      ]
+    },
+    "Person.addresslocation": {
+      "description": "",
+      "aliases": []
+    },
+    "Person.healthstatus": {
+      "description": "",
+      "aliases": []
+    },
+    "Person.name": {
+      "description": "",
+      "aliases": []
+    },
+    "Person.id": {
+      "description": "",
+      "aliases": []
+    },
+    "Person.confirmedtime": {
+      "description": "",
+      "aliases": []
+    },
+    "Place.homelocation": {
+      "description": "The geographical coordinates of the place.",
+      "aliases": [
+        "coordinates",
+        "location"
+      ]
+    },
+    "Place.type": {
+      "description": "The type of place (e.g., house, apartment, park).",
+      "aliases": [
+        "category",
+        "kind"
+      ]
+    },
+    "Place.id": {
+      "description": "A unique identifier for the place.",
+      "aliases": [
+        "identifier",
+        "key"
+      ]
+    },
+    "Place.name": {
+      "description": "The name of the place.",
+      "aliases": [
+        "title",
+        "label"
+      ]
+    },
+    "Region.name": {
+      "description": "The name of the region.",
+      "aliases": [
+        "label"
+      ]
+    },
+    "Visit.duration": {
+      "description": "The duration of the visit in minutes.",
+      "aliases": [
+        "length",
+        "time duration"
+      ]
+    },
+    "Visit.starttime": {
+      "description": "The start time of the visit.",
+      "aliases": [
+        "start time",
+        "beginning time",
+        "start date"
+      ]
+    },
+    "Visit.id": {
+      "description": "A unique identifier for the visit.",
+      "aliases": [
+        "visit id",
+        "visit number",
+        "visit identifier"
+      ]
+    },
+    "Visit.endtime": {
+      "description": "The end time of the visit.",
+      "aliases": [
+        "end time",
+        "ending time",
+        "end date"
+      ]
+    },
+    "_Bloom_Perspective_.version": {
+      "description": "The version of the Bloom perspective.",
+      "aliases": [
+        "version number",
+        "version level"
+      ]
+    },
+    "_Bloom_Perspective_.roles": {
+      "description": "The roles associated with the Bloom perspective.",
+      "aliases": [
+        "role list",
+        "role set"
+      ]
+    },
+    "_Bloom_Perspective_.data": {
+      "description": "The data associated with the Bloom perspective.",
+      "aliases": [
+        "data set",
+        "data collection"
+      ]
+    },
+    "_Bloom_Perspective_.name": {
+      "description": "The name of the Bloom perspective.",
+      "aliases": [
+        "name of the perspective",
+        "name of the entity"
+      ]
+    },
+    "_Bloom_Perspective_.id": {
+      "description": "The unique identifier of the Bloom perspective.",
+      "aliases": [
+        "identifier",
+        "unique identifier"
+      ]
+    },
+    "VISITS.duration": {
+      "description": "The duration of the visit in seconds.",
+      "aliases": [
+        "visit duration",
+        "visit time"
+      ]
+    },
+    "VISITS.starttime": {
+      "description": "The start time of the visit.",
+      "aliases": [
+        "start time",
+        "visit start",
+        "visit start time"
+      ]
+    },
+    "VISITS.id": {
+      "description": "A unique identifier for the visit.",
+      "aliases": [
+        "visit id",
+        "visit identifier"
+      ]
+    },
+    "VISITS.endtime": {
+      "description": "The end time of the visit.",
+      "aliases": [
+        "end time",
+        "visit end",
+        "visit end time"
+      ]
+    }
+  }
+}

@@ -1,0 +1,243 @@
+{
+  "data_source": "wwc",
+  "schema_version": "da264c84c85f8b90",
+  "semantics_version": "v1",
+  "sources": [
+    "rules",
+    "llm"
+  ],
+  "labels": {
+    "Match": {
+      "description": "A node representing a match in a sports tournament.",
+      "aliases": [
+        "matches",
+        "game",
+        "event"
+      ]
+    },
+    "Person": {
+      "description": "",
+      "aliases": [
+        "persons"
+      ]
+    },
+    "Squad": {
+      "description": "A group of people who play a sport together, often for a specific purpose.",
+      "aliases": [
+        "squads",
+        "team",
+        "group",
+        "sports team"
+      ]
+    },
+    "Team": {
+      "description": "A team in a sports league.",
+      "aliases": [
+        "teams",
+        "club",
+        "group"
+      ]
+    },
+    "Tournament": {
+      "description": "A tournament is a structured event where teams compete against each other.",
+      "aliases": [
+        "tournaments",
+        "event",
+        "competition",
+        "matchmaking"
+      ]
+    }
+  },
+  "relationships": {
+    "COACH_FOR": {
+      "description": "A relationship indicating that a person is a coach for a squad.",
+      "aliases": [
+        "coach for",
+        "coach",
+        "coach of",
+        "coach for squad",
+        "coach for team"
+      ]
+    },
+    "FOR": {
+      "description": "A relationship type that connects a Squad to a Tournament.",
+      "aliases": [
+        "squad-tournament relationship"
+      ]
+    },
+    "IN_SQUAD": {
+      "description": "A relationship between a person and a squad, indicating that the person is a member of the squad.",
+      "aliases": [
+        "in squad",
+        "member",
+        "part of",
+        "part of squad",
+        "squad member"
+      ]
+    },
+    "IN_TOURNAMENT": {
+      "description": "A relationship indicating that a match is part of a tournament.",
+      "aliases": [
+        "in tournament",
+        "tournament match",
+        "tournament participation",
+        "tournament entry"
+      ]
+    },
+    "NAMED": {
+      "description": "A relationship between a team and a squad, indicating that the team is named.",
+      "aliases": [
+        "team-squad relationship",
+        "named relationship",
+        "team squad link"
+      ]
+    },
+    "PARTICIPATED_IN": {
+      "description": "",
+      "aliases": [
+        "participated in"
+      ]
+    },
+    "PLAYED_IN": {
+      "description": "A relationship between a person and a match, indicating that the person played in the match.",
+      "aliases": [
+        "played in",
+        "played",
+        "participated",
+        "joined"
+      ]
+    },
+    "REPRESENTS": {
+      "description": "A relationship between a person and a team, indicating that the person represents the team.",
+      "aliases": [
+        "team representation",
+        "team leader"
+      ]
+    },
+    "SCORED_GOAL": {
+      "description": "A relationship between a person and a match where the person scored a goal.",
+      "aliases": [
+        "scored goal",
+        "scored",
+        "goal",
+        "match",
+        "person"
+      ]
+    }
+  },
+  "properties": {
+    "Match.id": {
+      "description": "A unique identifier for the match.",
+      "aliases": [
+        "match_id",
+        "game_id"
+      ]
+    },
+    "Match.stage": {
+      "description": "The stage of the match (e.g., preliminary, semi-final, final).",
+      "aliases": [
+        "round",
+        "phase"
+      ]
+    },
+    "Match.date": {
+      "description": "The date of the match.",
+      "aliases": [
+        "match_date"
+      ]
+    },
+    "Person.id": {
+      "description": "",
+      "aliases": []
+    },
+    "Person.name": {
+      "description": "",
+      "aliases": []
+    },
+    "Person.dob": {
+      "description": "",
+      "aliases": []
+    },
+    "Squad.id": {
+      "description": "A unique identifier for the squad.",
+      "aliases": [
+        "identifier",
+        "key",
+        "unique identifier"
+      ]
+    },
+    "Team.name": {
+      "description": "The name of the team.",
+      "aliases": [
+        "team name",
+        "club name"
+      ]
+    },
+    "Team.id": {
+      "description": "The unique identifier of the team.",
+      "aliases": [
+        "team id",
+        "club id"
+      ]
+    },
+    "Tournament.name": {
+      "description": "The name of the tournament",
+      "aliases": [
+        "title",
+        "event_name",
+        "name_of_tournament"
+      ]
+    },
+    "Tournament.id": {
+      "description": "A unique identifier for the tournament",
+      "aliases": [
+        "identifier",
+        "tournament_id",
+        "event_id"
+      ]
+    },
+    "Tournament.shortName": {
+      "description": "A short name for the tournament",
+      "aliases": [
+        "short name",
+        "short_title",
+        "short_name",
+        "short_event_name"
+      ]
+    },
+    "Tournament.year": {
+      "description": "The year of the tournament",
+      "aliases": [
+        "year_of_tournament",
+        "year_of_event"
+      ]
+    },
+    "PLAYED_IN.type": {
+      "description": "The type of relationship, e.g., 'played_in'",
+      "aliases": []
+    },
+    "PLAYED_IN.minuteOn": {
+      "description": "The time the person was on the match, in minutes",
+      "aliases": [
+        "minute on"
+      ]
+    },
+    "PLAYED_IN.score": {
+      "description": "The score of the match",
+      "aliases": []
+    },
+    "PLAYED_IN.penaltyScore": {
+      "description": "The penalty score of the match",
+      "aliases": [
+        "penalty score"
+      ]
+    },
+    "SCORED_GOAL.minute": {
+      "description": "The minute of the match when the goal was scored.",
+      "aliases": [
+        "time",
+        "scored_at"
+      ]
+    }
+  }
+}
