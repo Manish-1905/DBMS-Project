@@ -16,7 +16,7 @@ question (+ schema) ──► llama.cpp LLM ──► Cypher ──► Neo4j (re
 | `schema_retriever.py` | **Part 4.** Picks only the part of the schema a question needs (BM25 + schema-graph shortest paths) |
 | `eval_retrieval.py` | **Part 4.4.** Benchmarks the retriever on its own (recall, context reduction); no LLM or Neo4j needed |
 | `Benchmark/MTQ-Auto/test.parquet` | MTQ questions (`question`, `schema`, `cypher`, `data_source`, ...) |
-| `Datasets/*.dump` | Neo4j database dumps (one per graph) |
+| `Datasets/*.dump` | Neo4j database dumps, one per graph (not in git, see step 3) |
 
 ---
 
@@ -31,16 +31,16 @@ question (+ schema) ──► llama.cpp LLM ──► Cypher ──► Neo4j (re
 ## 2. Get the code and Python packages
 
 ```bash
-git clone https://github.com/TrimanSingh/ConText2Cypher.git
-cd ConText2Cypher
+git clone https://github.com/Manish-1905/DBMS-Project.git
+cd DBMS-Project
 uv sync            # creates .venv and installs neo4j, pandas, pyarrow, requests, duckdb
 ```
 
 ## 3. Load a graph into Neo4j
 
-> ⚠️ `Datasets/entity-resolution-50.dump` in the repo is **0 bytes** (the upload failed).
-> Get the real dump again (from the MTQ release or a teammate) before this step.
-> Don't commit large dumps to git; put a download link here instead (or use Git LFS).
+> The Neo4j dumps are **not** stored in git (too large). Get them from the
+> Mind the Query release (or a teammate) and put them in `Datasets/`
+> (ignored by git), e.g. `Datasets/entity-resolution-50.dump`.
 
 **Option A: Docker**
 
