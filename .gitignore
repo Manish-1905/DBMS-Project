@@ -18,3 +18,4 @@ neo4j/
 *.csv
 schemas/
 Datasets/*.dump
+.pytest_cache/
