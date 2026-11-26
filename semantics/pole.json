@@ -1,0 +1,490 @@
+{
+  "data_source": "pole",
+  "schema_version": "dcce9ff713626c32",
+  "semantics_version": "v1",
+  "sources": [
+    "rules",
+    "llm"
+  ],
+  "labels": {
+    "Area": {
+      "description": "A geographical area with a unique area code.",
+      "aliases": [
+        "areas",
+        "region",
+        "zone"
+      ]
+    },
+    "Crime": {
+      "description": "A node representing a crime in a search system.",
+      "aliases": [
+        "crimes",
+        "crimes database",
+        "crime record",
+        "crime information"
+      ]
+    },
+    "Email": {
+      "description": "A node representing an email address.",
+      "aliases": [
+        "emails",
+        "contact",
+        "mail"
+      ]
+    },
+    "Location": {
+      "description": "",
+      "aliases": [
+        "locations"
+      ]
+    },
+    "Object": {
+      "description": "A node representing an object in a search system.",
+      "aliases": [
+        "objects",
+        "item",
+        "asset"
+      ]
+    },
+    "Officer": {
+      "description": "A node representing an officer in a search system, with properties for badge number, rank, name, and surname, and a relationship to crimes they have investigated.",
+      "aliases": [
+        "officers",
+        "law enforcement officer",
+        "detective",
+        "police officer"
+      ]
+    },
+    "Person": {
+      "description": "A person in the system, including their surname, NHS number, name, age, and relationships with other people.",
+      "aliases": [
+        "persons",
+        "individual",
+        "individuals",
+        "people"
+      ]
+    },
+    "Phone": {
+      "description": "A node representing a phone number.",
+      "aliases": [
+        "phones",
+        "contact",
+        "telephone"
+      ]
+    },
+    "PhoneCall": {
+      "description": "A node representing a phone call with properties for duration, time, date, and type.",
+      "aliases": [
+        "phone call",
+        "phone calls",
+        "call",
+        "call record",
+        "call log"
+      ]
+    },
+    "PostCode": {
+      "description": "A unique identifier for a postal code.",
+      "aliases": [
+        "post code",
+        "post codes",
+        "zip code",
+        "postal code",
+        "code"
+      ]
+    },
+    "Vehicle": {
+      "description": "A vehicle involved in a crime.",
+      "aliases": [
+        "vehicles",
+        "car",
+        "vehicle involved",
+        "vehicle in crime"
+      ]
+    }
+  },
+  "relationships": {
+    "CALLED": {
+      "description": "A relationship indicating that one phone call was made by one phone.",
+      "aliases": [
+        "phone call",
+        "call"
+      ]
+    },
+    "CALLER": {
+      "description": "A relationship between a phone call and the phone that made the call.",
+      "aliases": [
+        "caller relationship",
+        "call relationship"
+      ]
+    },
+    "CURRENT_ADDRESS": {
+      "description": "A relationship between a person and their current location.",
+      "aliases": [
+        "current address",
+        "current residence",
+        "current location"
+      ]
+    },
+    "FAMILY_REL": {
+      "description": "A relationship type that connects two people in a family.",
+      "aliases": [
+        "family rel",
+        "family relationship",
+        "family link",
+        "family connection"
+      ]
+    },
+    "HAS_EMAIL": {
+      "description": "A relationship indicating that a person has an email address.",
+      "aliases": [
+        "has email",
+        "email link",
+        "contact info",
+        "contact details"
+      ]
+    },
+    "HAS_PHONE": {
+      "description": "A relationship indicating that a person has a phone number.",
+      "aliases": [
+        "has phone",
+        "phone relationship",
+        "phone connection",
+        "phone link"
+      ]
+    },
+    "HAS_POSTCODE": {
+      "description": "A relationship indicating that a location has a postal code.",
+      "aliases": [
+        "has postcode",
+        "location_postcode",
+        "location_postal_code_relationship"
+      ]
+    },
+    "INVESTIGATED_BY": {
+      "description": "A relationship indicating that a crime was investigated by an officer.",
+      "aliases": [
+        "investigated by",
+        "investigated",
+        "investigation",
+        "investigator"
+      ]
+    },
+    "INVOLVED_IN": {
+      "description": "A relationship between an object and a crime, indicating involvement in the crime.",
+      "aliases": [
+        "involved in",
+        "involved",
+        "linked",
+        "connected"
+      ]
+    },
+    "KNOWS": {
+      "description": "A relationship between two people indicating that they know each other.",
+      "aliases": [
+        "know",
+        "knows each other"
+      ]
+    },
+    "KNOWS_LW": {
+      "description": "A relationship indicating that two people know each other via a long-term relationship.",
+      "aliases": [
+        "knows lw",
+        "knows",
+        "knows each other",
+        "knows for a long time"
+      ]
+    },
+    "KNOWS_PHONE": {
+      "description": "A relationship between two people indicating that one person has a phone number that the other person can use to contact them.",
+      "aliases": [
+        "knows phone",
+        "phone relationship",
+        "contact person"
+      ]
+    },
+    "KNOWS_SN": {
+      "description": "A relationship indicating that two people know each other by sharing a specific social network.",
+      "aliases": [
+        "knows sn",
+        "knows_sns"
+      ]
+    },
+    "LOCATION_IN_AREA": {
+      "description": "A relationship indicating that a location is located within an area.",
+      "aliases": [
+        "location in area",
+        "located within",
+        "located in",
+        "located in area",
+        "located in area of",
+        "located in area of location"
+      ]
+    },
+    "OCCURRED_AT": {
+      "description": "A relationship indicating when a crime occurred at a specific location.",
+      "aliases": [
+        "occurred at",
+        "occurred",
+        "at",
+        "location",
+        "time"
+      ]
+    },
+    "PARTY_TO": {
+      "description": "",
+      "aliases": [
+        "party to"
+      ]
+    },
+    "POSTCODE_IN_AREA": {
+      "description": "A relationship indicating that a postal code is located within a specific area.",
+      "aliases": [
+        "postcode in area",
+        "area",
+        "postal code area",
+        "postal code location"
+      ]
+    }
+  },
+  "properties": {
+    "Area.areaCode": {
+      "description": "A unique identifier for the area.",
+      "aliases": [
+        "area code",
+        "code",
+        "identifier"
+      ]
+    },
+    "Crime.last_outcome": {
+      "description": "The outcome of the crime, such as 'resolved', 'unresolved', 'investigated', etc.",
+      "aliases": [
+        "last outcome",
+        "outcome",
+        "result",
+        "status",
+        "resolution",
+        "conclusion"
+      ]
+    },
+    "Crime.date": {
+      "description": "The date the crime occurred.",
+      "aliases": [
+        "time",
+        "timestamp",
+        "occurrence",
+        "date and time"
+      ]
+    },
+    "Crime.id": {
+      "description": "A unique identifier for the crime.",
+      "aliases": [
+        "identifier",
+        "code",
+        "number",
+        "id number",
+        "crimerecordid"
+      ]
+    },
+    "Crime.type": {
+      "description": "The type of crime, such as 'murder', 'robbery', 'assault', etc.",
+      "aliases": [
+        "category",
+        "subtype",
+        "crime category",
+        "crime type"
+      ]
+    },
+    "Email.email_address": {
+      "description": "The email address of the person.",
+      "aliases": [
+        "email address",
+        "email",
+        "contact",
+        "mail"
+      ]
+    },
+    "Location.longitude": {
+      "description": "",
+      "aliases": []
+    },
+    "Location.latitude": {
+      "description": "",
+      "aliases": []
+    },
+    "Location.address": {
+      "description": "",
+      "aliases": []
+    },
+    "Location.postcode": {
+      "description": "",
+      "aliases": []
+    },
+    "Object.description": {
+      "description": "A brief description of the object.",
+      "aliases": []
+    },
+    "Object.id": {
+      "description": "A unique identifier for the object.",
+      "aliases": [
+        "identifier"
+      ]
+    },
+    "Object.type": {
+      "description": "The type of the object.",
+      "aliases": [
+        "category"
+      ]
+    },
+    "Officer.badge_no": {
+      "description": "The unique identifier for the officer's badge.",
+      "aliases": [
+        "badge no",
+        "badge number",
+        "badge id"
+      ]
+    },
+    "Officer.rank": {
+      "description": "The rank of the officer, such as detective, sergeant, or captain.",
+      "aliases": [
+        "rank level",
+        "rank title"
+      ]
+    },
+    "Officer.name": {
+      "description": "The first name of the officer.",
+      "aliases": [
+        "first name",
+        "first name of officer"
+      ]
+    },
+    "Officer.surname": {
+      "description": "The last name of the officer.",
+      "aliases": [
+        "last name",
+        "last name of officer"
+      ]
+    },
+    "Person.surname": {
+      "description": "The last name of the person.",
+      "aliases": [
+        "last name",
+        "lname"
+      ]
+    },
+    "Person.nhs_no": {
+      "description": "The National Health Service number of the person.",
+      "aliases": [
+        "nhs no",
+        "nhs number",
+        "nhs",
+        "nhsid"
+      ]
+    },
+    "Person.name": {
+      "description": "The full name of the person.",
+      "aliases": [
+        "full name",
+        "fname",
+        "lname"
+      ]
+    },
+    "Person.age": {
+      "description": "The age of the person.",
+      "aliases": [
+        "yrs",
+        "years"
+      ]
+    },
+    "Phone.phoneNo": {
+      "description": "The phone number itself as a string.",
+      "aliases": [
+        "phone no",
+        "number",
+        "contactinfo"
+      ]
+    },
+    "PhoneCall.call_duration": {
+      "description": "The duration of the call in seconds.",
+      "aliases": [
+        "call duration",
+        "duration",
+        "time length",
+        "length"
+      ]
+    },
+    "PhoneCall.call_time": {
+      "description": "The time of the call in 24-hour format.",
+      "aliases": [
+        "call time",
+        "time",
+        "time of day",
+        "time stamp"
+      ]
+    },
+    "PhoneCall.call_date": {
+      "description": "The date of the call in YYYY-MM-DD format.",
+      "aliases": [
+        "call date",
+        "date",
+        "date of call",
+        "date stamp"
+      ]
+    },
+    "PhoneCall.call_type": {
+      "description": "The type of call (e.g., voice, video, text).",
+      "aliases": [
+        "call type",
+        "type",
+        "call category",
+        "call mode"
+      ]
+    },
+    "PostCode.code": {
+      "description": "The actual postal code string.",
+      "aliases": [
+        "postal code"
+      ]
+    },
+    "Vehicle.model": {
+      "description": "The model of the vehicle.",
+      "aliases": [
+        "car model",
+        "vehicle type",
+        "car model name"
+      ]
+    },
+    "Vehicle.reg": {
+      "description": "The registration number of the vehicle.",
+      "aliases": [
+        "registration",
+        "car registration",
+        "vehicle registration number"
+      ]
+    },
+    "Vehicle.make": {
+      "description": "The make of the vehicle.",
+      "aliases": [
+        "car make",
+        "vehicle brand",
+        "car brand name"
+      ]
+    },
+    "Vehicle.year": {
+      "description": "The year the vehicle was manufactured.",
+      "aliases": [
+        "car year",
+        "vehicle year",
+        "car production year"
+      ]
+    },
+    "FAMILY_REL.rel_type": {
+      "description": "A string representing the type of family relationship (e.g., parent-child, sibling, spouse).",
+      "aliases": [
+        "rel type",
+        "relationship type",
+        "relation type",
+        "family type"
+      ]
+    }
+  }
+}
