@@ -1,0 +1,439 @@
+{
+  "data_source": "healthcare",
+  "schema_version": "889b680cf28b3184",
+  "semantics_version": "v1",
+  "sources": [
+    "rules",
+    "llm"
+  ],
+  "labels": {
+    "AgeGroup": {
+      "description": "A node representing an age group in a search system.",
+      "aliases": [
+        "age group",
+        "age groups",
+        "age range",
+        "age bracket"
+      ]
+    },
+    "Case": {
+      "description": "A node representing a case in a search system.",
+      "aliases": [
+        "cases",
+        "case record",
+        "case entry"
+      ]
+    },
+    "Drug": {
+      "description": "A node representing a drug in a search system.",
+      "aliases": [
+        "drugs",
+        "medication",
+        "drug entity"
+      ]
+    },
+    "Manufacturer": {
+      "description": "A node representing a manufacturer of cases.",
+      "aliases": [
+        "manufacturers",
+        "company",
+        "maker"
+      ]
+    },
+    "Outcome": {
+      "description": "A node representing the outcome of a case.",
+      "aliases": [
+        "outcomes",
+        "result",
+        "outcome node",
+        "case outcome"
+      ]
+    },
+    "Reaction": {
+      "description": "A reaction associated with a case.",
+      "aliases": [
+        "reactions",
+        "reaction associated",
+        "reaction with case"
+      ]
+    },
+    "ReportSource": {
+      "description": "A node representing a source of reports, with a unique code and name.",
+      "aliases": [
+        "report source",
+        "report sources",
+        "source",
+        "reporter",
+        "reporting entity"
+      ]
+    },
+    "Therapy": {
+      "description": "A node representing a therapy session in a search system.",
+      "aliases": [
+        "therapies",
+        "therapy session",
+        "therapy appointment",
+        "therapy treatment"
+      ]
+    }
+  },
+  "relationships": {
+    "FALLS_UNDER": {
+      "description": "A relationship between a case and an age group, indicating that the case falls under the specified age group.",
+      "aliases": [
+        "falls under",
+        "case falls under",
+        "case in age group"
+      ]
+    },
+    "HAS_REACTION": {
+      "description": "A relationship indicating that a case has been reacted to.",
+      "aliases": [
+        "has reaction",
+        "reaction",
+        "reactioned",
+        "reacted to"
+      ]
+    },
+    "IS_CONCOMITANT": {
+      "description": "A relationship indicating that a drug is concomitantly used with another drug in a case.",
+      "aliases": [
+        "is concomitant",
+        "concomitant use",
+        "drug combination",
+        "drug pairing"
+      ]
+    },
+    "IS_PRIMARY_SUSPECT": {
+      "description": "A relationship indicating that a drug is the primary suspect in a case.",
+      "aliases": [
+        "is primary suspect",
+        "suspect",
+        "primary suspect",
+        "drug suspect"
+      ]
+    },
+    "IS_SECONDARY_SUSPECT": {
+      "description": "A relationship indicating a secondary suspect in a case, connecting a drug to the case.",
+      "aliases": [
+        "is secondary suspect",
+        "secondary suspect",
+        "secondary suspect relationship",
+        "secondary suspect connection"
+      ]
+    },
+    "PRESCRIBED": {
+      "description": "A relationship between a therapy and a drug, indicating when the drug was prescribed.",
+      "aliases": [
+        "medication",
+        "drug therapy"
+      ]
+    },
+    "RECEIVED": {
+      "description": "A relationship indicating that a case has received therapy.",
+      "aliases": [
+        "received therapy",
+        "therapy received",
+        "therapy for case"
+      ]
+    },
+    "REGISTERED": {
+      "description": "A relationship indicating that a manufacturer has registered a case.",
+      "aliases": [
+        "registration",
+        "registration relationship"
+      ]
+    },
+    "REPORTED_BY": {
+      "description": "A relationship indicating that a case was reported by a specific source.",
+      "aliases": [
+        "reported by",
+        "source of report",
+        "reporter"
+      ]
+    },
+    "RESULTED_IN": {
+      "description": "A relationship indicating that a case resulted in an outcome.",
+      "aliases": [
+        "resulted in",
+        "outcome",
+        "result",
+        "outcome of case"
+      ]
+    }
+  },
+  "properties": {
+    "AgeGroup.ageGroup": {
+      "description": "A string representing the age group, e.g., '18-24', '25-34', '35-44', '45-54', '55+'",
+      "aliases": [
+        "age group",
+        "age range",
+        "age bracket"
+      ]
+    },
+    "Case.reporterOccupation": {
+      "description": "The occupation of the person who reported the case.",
+      "aliases": [
+        "reporter occupation",
+        "occupation",
+        "job",
+        "occupation of reporter"
+      ]
+    },
+    "Case.gender": {
+      "description": "The gender of the person who reported the case.",
+      "aliases": [
+        "sex",
+        "gender of reporter"
+      ]
+    },
+    "Case.eventDate": {
+      "description": "The date of the event that led to the case.",
+      "aliases": [
+        "event date",
+        "event date of case",
+        "date of event"
+      ]
+    },
+    "Case.reportDate": {
+      "description": "The date when the case was reported.",
+      "aliases": [
+        "report date",
+        "date of report",
+        "date of case report"
+      ]
+    },
+    "Case.primaryid": {
+      "description": "A unique identifier for the case.",
+      "aliases": [
+        "case id",
+        "case identifier",
+        "unique identifier for case"
+      ]
+    },
+    "Case.age": {
+      "description": "The age of the person who reported the case.",
+      "aliases": [
+        "age of reporter",
+        "age of case",
+        "age of person"
+      ]
+    },
+    "Case.ageUnit": {
+      "description": "The unit of measurement for the age of the person who reported the case.",
+      "aliases": [
+        "age unit",
+        "unit of age",
+        "unit of age of reporter"
+      ]
+    },
+    "Drug.primarySubstabce": {
+      "description": "",
+      "aliases": [
+        "primary substabce"
+      ]
+    },
+    "Drug.name": {
+      "description": "The official name of the drug.",
+      "aliases": [
+        "drug name",
+        "official drug name",
+        "drug identifier"
+      ]
+    },
+    "Manufacturer.manufacturerName": {
+      "description": "The name of the manufacturer.",
+      "aliases": [
+        "manufacturer name",
+        "name",
+        "companyname",
+        "makername"
+      ]
+    },
+    "Outcome.outcome": {
+      "description": "The result or outcome of a case.",
+      "aliases": [
+        "result description",
+        "outcome description"
+      ]
+    },
+    "Outcome.code": {
+      "description": "A unique code associated with the outcome.",
+      "aliases": [
+        "code description"
+      ]
+    },
+    "Reaction.description": {
+      "description": "A brief description of the reaction.",
+      "aliases": [
+        "description of reaction"
+      ]
+    },
+    "ReportSource.code": {
+      "description": "A unique identifier for the report source.",
+      "aliases": [
+        "id",
+        "key"
+      ]
+    },
+    "ReportSource.name": {
+      "description": "The name of the report source.",
+      "aliases": [
+        "label"
+      ]
+    },
+    "Therapy.primaryid": {
+      "description": "The unique identifier for the therapy session.",
+      "aliases": [
+        "session id",
+        "therapy id"
+      ]
+    },
+    "IS_CONCOMITANT.indication": {
+      "description": "The indication for the concomitant use of the drugs.",
+      "aliases": [
+        "reason",
+        "purpose"
+      ]
+    },
+    "IS_CONCOMITANT.route": {
+      "description": "The route of administration for the concomitant use of the drugs.",
+      "aliases": [
+        "delivery",
+        "administration"
+      ]
+    },
+    "IS_CONCOMITANT.doseAmount": {
+      "description": "The amount of the concomitant drug used.",
+      "aliases": [
+        "dose amount",
+        "dose",
+        "quantity",
+        "amount"
+      ]
+    },
+    "IS_CONCOMITANT.doseUnit": {
+      "description": "The unit of measurement for the concomitant drug dose.",
+      "aliases": [
+        "dose unit",
+        "unit",
+        "measurement",
+        "scale"
+      ]
+    },
+    "IS_CONCOMITANT.drugSequence": {
+      "description": "The order in which the drugs are administered.",
+      "aliases": [
+        "drug sequence",
+        "sequence",
+        "order",
+        "position"
+      ]
+    },
+    "IS_PRIMARY_SUSPECT.indication": {
+      "description": "The indication for the drug.",
+      "aliases": [
+        "cause",
+        "reason"
+      ]
+    },
+    "IS_PRIMARY_SUSPECT.route": {
+      "description": "The route of administration of the drug.",
+      "aliases": [
+        "delivery",
+        "administration"
+      ]
+    },
+    "IS_PRIMARY_SUSPECT.doseAmount": {
+      "description": "The amount of the drug administered.",
+      "aliases": [
+        "dose amount",
+        "amount",
+        "dose",
+        "quantity"
+      ]
+    },
+    "IS_PRIMARY_SUSPECT.doseUnit": {
+      "description": "The unit of measurement for the drug dose.",
+      "aliases": [
+        "dose unit",
+        "unit",
+        "measurement",
+        "scale"
+      ]
+    },
+    "IS_PRIMARY_SUSPECT.drugSequence": {
+      "description": "The sequence in which the drug was administered.",
+      "aliases": [
+        "drug sequence",
+        "sequence",
+        "order",
+        "position"
+      ]
+    },
+    "IS_SECONDARY_SUSPECT.indication": {
+      "description": "The indication for the drug in the case.",
+      "aliases": [
+        "indications",
+        "indications for drug"
+      ]
+    },
+    "IS_SECONDARY_SUSPECT.doseAmount": {
+      "description": "The amount of the drug administered in the case.",
+      "aliases": [
+        "dose amount",
+        "dose",
+        "doses"
+      ]
+    },
+    "IS_SECONDARY_SUSPECT.doseUnit": {
+      "description": "The unit of measurement for the dose of the drug in the case.",
+      "aliases": [
+        "dose unit",
+        "unit",
+        "units",
+        "unit of measurement"
+      ]
+    },
+    "IS_SECONDARY_SUSPECT.drugSequence": {
+      "description": "The sequence of the drug in the case.",
+      "aliases": [
+        "drug sequence",
+        "sequence",
+        "sequences",
+        "sequence of drug"
+      ]
+    },
+    "IS_SECONDARY_SUSPECT.route": {
+      "description": "The route of administration of the drug in the case.",
+      "aliases": [
+        "routes",
+        "route of administration"
+      ]
+    },
+    "PRESCRIBED.drugSequence": {
+      "description": "The sequence of drugs prescribed for the therapy.",
+      "aliases": [
+        "drug sequence",
+        "sequence",
+        "order"
+      ]
+    },
+    "PRESCRIBED.endYear": {
+      "description": "The year the drug was prescribed.",
+      "aliases": [
+        "end year",
+        "end",
+        "finish"
+      ]
+    },
+    "PRESCRIBED.startYear": {
+      "description": "The year the drug was prescribed.",
+      "aliases": [
+        "start year",
+        "start",
+        "begin"
+      ]
+    }
+  }
+}

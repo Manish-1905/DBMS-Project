@@ -1,0 +1,180 @@
+{
+  "data_source": "er",
+  "schema_version": "14b1692b201450b3",
+  "semantics_version": "v1",
+  "sources": [
+    "rules",
+    "llm"
+  ],
+  "labels": {
+    "Genre": {
+      "description": "A genre of movies.",
+      "aliases": [
+        "genres",
+        "type",
+        "category",
+        "classification"
+      ]
+    },
+    "IpAddress": {
+      "description": "A node representing an IP address used by a user.",
+      "aliases": [
+        "ip address",
+        "ip addresses",
+        "ip",
+        "network address",
+        "host"
+      ]
+    },
+    "Movie": {
+      "description": "A node representing a movie in a search system.",
+      "aliases": [
+        "movies",
+        "film",
+        "movie title",
+        "movie id"
+      ]
+    },
+    "User": {
+      "description": "A user in the system, identified by a unique ID.",
+      "aliases": [
+        "users",
+        "person",
+        "account"
+      ]
+    }
+  },
+  "relationships": {
+    "HAS": {
+      "description": "A relationship between a movie and its genre.",
+      "aliases": [
+        "genre relationship",
+        "movie genre link"
+      ]
+    },
+    "USES": {
+      "description": "A relationship between a user and their IP address.",
+      "aliases": [
+        "connection",
+        "interaction"
+      ]
+    },
+    "WATCHED": {
+      "description": "A relationship indicating that a user has watched a movie.",
+      "aliases": [
+        "viewed",
+        "seen"
+      ]
+    }
+  },
+  "properties": {
+    "Genre.name": {
+      "description": "The name of the genre.",
+      "aliases": [
+        "type",
+        "category",
+        "classification"
+      ]
+    },
+    "IpAddress.address": {
+      "description": "The IP address string.",
+      "aliases": [
+        "ip address",
+        "network address",
+        "host"
+      ]
+    },
+    "Movie.year": {
+      "description": "The year the movie was released.",
+      "aliases": [
+        "release year",
+        "release date"
+      ]
+    },
+    "Movie.movieId": {
+      "description": "The unique identifier for the movie.",
+      "aliases": [
+        "movie id",
+        "id",
+        "identifier"
+      ]
+    },
+    "Movie.title": {
+      "description": "The title of the movie.",
+      "aliases": [
+        "name",
+        "title of movie"
+      ]
+    },
+    "User.phone": {
+      "description": "The user's phone number.",
+      "aliases": [
+        "contact",
+        "number",
+        "contact info"
+      ]
+    },
+    "User.email": {
+      "description": "The user's email address.",
+      "aliases": [
+        "contact",
+        "address"
+      ]
+    },
+    "User.lastName": {
+      "description": "The user's last name.",
+      "aliases": [
+        "last name",
+        "surname",
+        "last",
+        "family"
+      ]
+    },
+    "User.gender": {
+      "description": "The user's gender.",
+      "aliases": [
+        "sex"
+      ]
+    },
+    "User.country": {
+      "description": "The user's country.",
+      "aliases": [
+        "location",
+        "origin"
+      ]
+    },
+    "User.state": {
+      "description": "The user's state.",
+      "aliases": [
+        "location",
+        "region"
+      ]
+    },
+    "User.firstName": {
+      "description": "The user's first name.",
+      "aliases": [
+        "first name",
+        "name",
+        "first",
+        "given"
+      ]
+    },
+    "User.userId": {
+      "description": "The unique identifier for the user.",
+      "aliases": [
+        "user id",
+        "id",
+        "account id"
+      ]
+    },
+    "WATCHED.watchCount": {
+      "description": "The number of times a user has watched a movie.",
+      "aliases": [
+        "watch count",
+        "watched_count",
+        "viewed_count",
+        "seen_count"
+      ]
+    }
+  }
+}

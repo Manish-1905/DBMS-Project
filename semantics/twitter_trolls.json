@@ -1,0 +1,433 @@
+{
+  "data_source": "twitter_trolls",
+  "schema_version": "3e2c63b9cf846718",
+  "semantics_version": "v1",
+  "sources": [
+    "rules",
+    "llm"
+  ],
+  "labels": {
+    "Hashtag": {
+      "description": "A node representing a hashtag used in a tweet.",
+      "aliases": [
+        "hashtags",
+        "tag",
+        "tweet hashtag"
+      ]
+    },
+    "Source": {
+      "description": "A node representing the source of a tweet.",
+      "aliases": [
+        "sources",
+        "origin",
+        "originator",
+        "originator node"
+      ]
+    },
+    "Troll": {
+      "description": "A user who has posted tweets and been mentioned in tweets.",
+      "aliases": [
+        "trolls",
+        "user",
+        "tweet poster"
+      ]
+    },
+    "Tweet": {
+      "description": "A node representing a tweet, containing text, creation date, and other metadata.",
+      "aliases": [
+        "tweets",
+        "tweet node",
+        "tweet record"
+      ]
+    },
+    "URL": {
+      "description": "A URL that is associated with a tweet.",
+      "aliases": [
+        "urls",
+        "link",
+        "external link",
+        "web address"
+      ]
+    },
+    "User": {
+      "description": "A user in the search system.",
+      "aliases": [
+        "users",
+        "account",
+        "profile"
+      ]
+    }
+  },
+  "relationships": {
+    "HAS_LINK": {
+      "description": "A relationship between a tweet and a URL.",
+      "aliases": [
+        "has link",
+        "link",
+        "connection",
+        "connection between tweet and url"
+      ]
+    },
+    "HAS_TAG": {
+      "description": "A relationship between a tweet and a hashtag.",
+      "aliases": [
+        "has tag",
+        "tagged",
+        "tagged with",
+        "tagged to"
+      ]
+    },
+    "IN_REPLY_TO": {
+      "description": "A relationship between two tweets where one tweet is a reply to another.",
+      "aliases": [
+        "in reply to",
+        "reply",
+        "replies",
+        "replied to",
+        "replies to",
+        "replying to"
+      ]
+    },
+    "MENTIONS": {
+      "description": "A relationship between a tweet and a user or troll that indicates the tweet mentions them.",
+      "aliases": [
+        "tweet mentions",
+        "user mentions",
+        "troll mentions"
+      ]
+    },
+    "POSTED": {
+      "description": "A relationship between a user and a tweet, indicating that the user posted the tweet.",
+      "aliases": [
+        "tweeted",
+        "post",
+        "tweeted by"
+      ]
+    },
+    "POSTED_VIA": {
+      "description": "A relationship indicating that a Tweet was posted via a specific Source.",
+      "aliases": [
+        "posted via",
+        "tweeted via",
+        "tweeted by",
+        "tweeted from"
+      ]
+    },
+    "RETWEETED": {
+      "description": "A relationship indicating that one tweet was retweeted by another.",
+      "aliases": [
+        "retweet",
+        "retweeting"
+      ]
+    }
+  },
+  "properties": {
+    "Hashtag.tag": {
+      "description": "The text of the hashtag.",
+      "aliases": [
+        "hashtag text",
+        "tag text"
+      ]
+    },
+    "Source.name": {
+      "description": "The name of the source node.",
+      "aliases": [
+        "source name",
+        "source identifier"
+      ]
+    },
+    "Troll.screen_name": {
+      "description": "The username of the user.",
+      "aliases": [
+        "screen name",
+        "username",
+        "handle"
+      ]
+    },
+    "Troll.time_zone": {
+      "description": "The time zone of the user.",
+      "aliases": [
+        "time zone",
+        "tz"
+      ]
+    },
+    "Troll.verified": {
+      "description": "Whether the user is verified.",
+      "aliases": [
+        "status"
+      ]
+    },
+    "Troll.lang": {
+      "description": "The language of the user's tweets.",
+      "aliases": [
+        "language"
+      ]
+    },
+    "Troll.listed_count": {
+      "description": "The number of users who have listed the user.",
+      "aliases": [
+        "listed count",
+        "listed",
+        "list"
+      ]
+    },
+    "Troll.location": {
+      "description": "The location of the user.",
+      "aliases": [
+        "place"
+      ]
+    },
+    "Troll.statuses_count": {
+      "description": "The number of tweets posted by the user.",
+      "aliases": [
+        "statuses count",
+        "tweets",
+        "tweet",
+        "tweet count"
+      ]
+    },
+    "Troll.description": {
+      "description": "The description of the user.",
+      "aliases": [
+        "bio"
+      ]
+    },
+    "Troll.favourites_count": {
+      "description": "The number of tweets the user has favorited.",
+      "aliases": [
+        "favourites count",
+        "favourites",
+        "favorite",
+        "favourite count"
+      ]
+    },
+    "Troll.followers_count": {
+      "description": "The number of followers the user has.",
+      "aliases": [
+        "followers count",
+        "followers",
+        "follow",
+        "follower count"
+      ]
+    },
+    "Troll.friends_count": {
+      "description": "The number of friends the user has.",
+      "aliases": [
+        "friends count",
+        "friends",
+        "friend",
+        "friend count"
+      ]
+    },
+    "Troll.name": {
+      "description": "The name of the user.",
+      "aliases": [
+        "display name"
+      ]
+    },
+    "Troll.created_at": {
+      "description": "The date the user was created.",
+      "aliases": [
+        "created at",
+        "created",
+        "creation",
+        "creation date"
+      ]
+    },
+    "Troll.id": {
+      "description": "The unique identifier of the user.",
+      "aliases": [
+        "user id",
+        "user identifier"
+      ]
+    },
+    "Troll.user_key": {
+      "description": "The unique identifier of the user.",
+      "aliases": [
+        "user key",
+        "key",
+        "user identifier"
+      ]
+    },
+    "Tweet.text": {
+      "description": "The content of the tweet as a string.",
+      "aliases": [
+        "tweet content",
+        "tweet text",
+        "tweet message"
+      ]
+    },
+    "Tweet.created_at": {
+      "description": "The timestamp when the tweet was created.",
+      "aliases": [
+        "created at",
+        "tweet creation time",
+        "tweet date",
+        "tweet timestamp"
+      ]
+    },
+    "Tweet.created_str": {
+      "description": "The string representation of the tweet creation date.",
+      "aliases": [
+        "created str",
+        "tweet creation date string",
+        "tweet date string",
+        "tweet creation date representation"
+      ]
+    },
+    "Tweet.id": {
+      "description": "The unique identifier of the tweet.",
+      "aliases": [
+        "tweet identifier",
+        "tweet id",
+        "tweet unique identifier"
+      ]
+    },
+    "Tweet.retweeted": {
+      "description": "Indicates whether the tweet has been retweeted.",
+      "aliases": [
+        "tweet retweet status"
+      ]
+    },
+    "Tweet.retweet_count": {
+      "description": "The number of times the tweet has been retweeted.",
+      "aliases": [
+        "retweet count",
+        "tweet retweet count"
+      ]
+    },
+    "Tweet.favorite_count": {
+      "description": "The number of times the tweet has been favorited.",
+      "aliases": [
+        "favorite count",
+        "tweet favorite count"
+      ]
+    },
+    "URL.expanded_url": {
+      "description": "The full URL of the linked resource.",
+      "aliases": [
+        "expanded url",
+        "full url",
+        "external link url"
+      ]
+    },
+    "User.time_zone": {
+      "description": "The time zone of the user's location.",
+      "aliases": [
+        "time zone",
+        "tz"
+      ]
+    },
+    "User.screen_name": {
+      "description": "The username of the user.",
+      "aliases": [
+        "screen name",
+        "username",
+        "handle"
+      ]
+    },
+    "User.listed_count": {
+      "description": "The number of users who have listed this user.",
+      "aliases": [
+        "listed count",
+        "listed",
+        "following",
+        "following count"
+      ]
+    },
+    "User.location": {
+      "description": "The location of the user.",
+      "aliases": [
+        "place",
+        "place name"
+      ]
+    },
+    "User.statuses_count": {
+      "description": "The number of tweets posted by the user.",
+      "aliases": [
+        "statuses count",
+        "tweets",
+        "tweet count",
+        "tweet number"
+      ]
+    },
+    "User.verified": {
+      "description": "Whether the user is verified.",
+      "aliases": [
+        "verified status"
+      ]
+    },
+    "User.favourites_count": {
+      "description": "The number of tweets the user has favorited.",
+      "aliases": [
+        "favourites count",
+        "favourites",
+        "favourite count",
+        "favourite number"
+      ]
+    },
+    "User.followers_count": {
+      "description": "The number of followers the user has.",
+      "aliases": [
+        "followers count",
+        "followers",
+        "follower count",
+        "follower number"
+      ]
+    },
+    "User.friends_count": {
+      "description": "The number of friends the user has.",
+      "aliases": [
+        "friends count",
+        "friends",
+        "friend count",
+        "friend number"
+      ]
+    },
+    "User.lang": {
+      "description": "The language of the user's tweets.",
+      "aliases": [
+        "language",
+        "language code",
+        "language name"
+      ]
+    },
+    "User.name": {
+      "description": "The name of the user.",
+      "aliases": [
+        "display name"
+      ]
+    },
+    "User.created_at": {
+      "description": "The date and time the user was created.",
+      "aliases": [
+        "created at",
+        "created",
+        "creation date",
+        "creation time"
+      ]
+    },
+    "User.description": {
+      "description": "The description of the user.",
+      "aliases": [
+        "bio",
+        "bio description"
+      ]
+    },
+    "User.id": {
+      "description": "The unique identifier of the user.",
+      "aliases": [
+        "user id",
+        "user identifier"
+      ]
+    },
+    "User.user_key": {
+      "description": "A unique identifier for the user.",
+      "aliases": [
+        "user key",
+        "key",
+        "user identifier"
+      ]
+    }
+  }
+}

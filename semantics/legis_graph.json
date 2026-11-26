@@ -1,0 +1,398 @@
+{
+  "data_source": "legis_graph",
+  "schema_version": "d88b1499421ad569",
+  "semantics_version": "v1",
+  "sources": [
+    "rules",
+    "llm"
+  ],
+  "labels": {
+    "Bill": {
+      "description": "A node representing a bill in a legislative system.",
+      "aliases": [
+        "bills",
+        "legislation",
+        "law"
+      ]
+    },
+    "Body": {
+      "description": "A node representing a body of legislation, such as a committee or subcommittee.",
+      "aliases": [
+        "bodies",
+        "legislative body",
+        "legislative chamber",
+        "legislative committee"
+      ]
+    },
+    "Committee": {
+      "description": "A node representing a committee in a legislative system.",
+      "aliases": [
+        "committees",
+        "legislative body",
+        "committee of representatives"
+      ]
+    },
+    "Congress": {
+      "description": "A node representing a Congress, with a unique identifier for each congress.",
+      "aliases": [
+        "congresses",
+        "legislative body",
+        "assembly"
+      ]
+    },
+    "Legislator": {
+      "description": "",
+      "aliases": [
+        "legislators"
+      ]
+    },
+    "Party": {
+      "description": "A node representing a political party.",
+      "aliases": [
+        "parties",
+        "political party",
+        "political group"
+      ]
+    },
+    "State": {
+      "description": "A state in the United States.",
+      "aliases": [
+        "states",
+        "state code",
+        "state abbreviation"
+      ]
+    },
+    "Subject": {
+      "description": "A subject that Bill deals with.",
+      "aliases": [
+        "subjects",
+        "business partner",
+        "client"
+      ]
+    }
+  },
+  "relationships": {
+    "DEALS_WITH": {
+      "description": "A relationship between a Bill and a Subject indicating that the Bill deals with the Subject.",
+      "aliases": [
+        "deals with",
+        "business relationship",
+        "interaction"
+      ]
+    },
+    "ELECTED_TO": {
+      "description": "A relationship indicating that a legislator was elected to a specific body.",
+      "aliases": [
+        "elected to",
+        "elected",
+        "legislative",
+        "office"
+      ]
+    },
+    "IS_MEMBER_OF": {
+      "description": "A relationship indicating that a legislator belongs to a political party.",
+      "aliases": [
+        "is member of",
+        "member of",
+        "political affiliation",
+        "party affiliation"
+      ]
+    },
+    "PROPOSED_DURING": {
+      "description": "A relationship indicating when a bill was proposed during a specific congress.",
+      "aliases": [
+        "proposed during",
+        "bill congress"
+      ]
+    },
+    "REFERRED_TO": {
+      "description": "A relationship indicating that one entity (Bill) is referred to by another entity (Committee).",
+      "aliases": [
+        "referred to",
+        "refers to",
+        "linked to",
+        "related to"
+      ]
+    },
+    "REPRESENTS": {
+      "description": "Represents a legislator in a specific state.",
+      "aliases": [
+        "legislator",
+        "state",
+        "representative"
+      ]
+    },
+    "SERVES_ON": {
+      "description": "A relationship between a legislator and a committee, indicating the rank of the legislator in the committee.",
+      "aliases": [
+        "serves on",
+        "legislative role",
+        "committee membership",
+        "rank in committee"
+      ]
+    },
+    "SPONSORED_BY": {
+      "description": "A relationship between a legislator and a bill where the legislator is a cosponsor.",
+      "aliases": [
+        "sponsored by",
+        "cosponsorship",
+        "cosponsorship relationship"
+      ]
+    },
+    "VOTED_ON": {
+      "description": "A relationship between a legislator and a bill where the legislator voted on the bill.",
+      "aliases": [
+        "voted on",
+        "voted",
+        "vote",
+        "voting"
+      ]
+    }
+  },
+  "properties": {
+    "Bill.billID": {
+      "description": "A unique identifier for the bill.",
+      "aliases": [
+        "bill id",
+        "id",
+        "number",
+        "code"
+      ]
+    },
+    "Bill.active": {
+      "description": "A boolean indicating whether the bill is currently active.",
+      "aliases": [
+        "status"
+      ]
+    },
+    "Bill.officialTitle": {
+      "description": "The official title of the bill.",
+      "aliases": [
+        "official title",
+        "title",
+        "name"
+      ]
+    },
+    "Bill.enacted": {
+      "description": "A boolean indicating whether the bill has been enacted.",
+      "aliases": [
+        "passed"
+      ]
+    },
+    "Bill.vetoed": {
+      "description": "A boolean indicating whether the bill has been vetoed.",
+      "aliases": [
+        "rejected"
+      ]
+    },
+    "Body.type": {
+      "description": "The type of body, such as 'committee', 'subcommittee', or 'joint committee'.",
+      "aliases": [
+        "classification"
+      ]
+    },
+    "Committee.url": {
+      "description": "The URL of the committee's website.",
+      "aliases": [
+        "website"
+      ]
+    },
+    "Committee.jurisdiction": {
+      "description": "The jurisdiction where the committee operates.",
+      "aliases": [
+        "location"
+      ]
+    },
+    "Committee.type": {
+      "description": "The type of committee (e.g., House, Senate, Joint)",
+      "aliases": [
+        "classification"
+      ]
+    },
+    "Committee.thomasID": {
+      "description": "The Thomas ID of the committee.",
+      "aliases": [
+        "thomas id",
+        "thomas_id",
+        "thomas_number"
+      ]
+    },
+    "Committee.name": {
+      "description": "The name of the committee.",
+      "aliases": [
+        "committee_name"
+      ]
+    },
+    "Congress.number": {
+      "description": "A unique identifier for each congress, typically a number.",
+      "aliases": [
+        "congress_id",
+        "legislative_year"
+      ]
+    },
+    "Legislator.fecIDs": {
+      "description": "",
+      "aliases": [
+        "fec i ds"
+      ]
+    },
+    "Legislator.govtrackID": {
+      "description": "",
+      "aliases": [
+        "govtrack id"
+      ]
+    },
+    "Legislator.party": {
+      "description": "",
+      "aliases": []
+    },
+    "Legislator.state": {
+      "description": "",
+      "aliases": []
+    },
+    "Legislator.republicanCount": {
+      "description": "",
+      "aliases": [
+        "republican count"
+      ]
+    },
+    "Legislator.currentParty": {
+      "description": "",
+      "aliases": [
+        "current party"
+      ]
+    },
+    "Legislator.lisID": {
+      "description": "",
+      "aliases": [
+        "lis id"
+      ]
+    },
+    "Legislator.cspanID": {
+      "description": "",
+      "aliases": [
+        "cspan id"
+      ]
+    },
+    "Legislator.wikipediaID": {
+      "description": "",
+      "aliases": [
+        "wikipedia id"
+      ]
+    },
+    "Legislator.religion": {
+      "description": "",
+      "aliases": []
+    },
+    "Legislator.firstName": {
+      "description": "",
+      "aliases": [
+        "first name"
+      ]
+    },
+    "Legislator.opensecretsID": {
+      "description": "",
+      "aliases": [
+        "opensecrets id"
+      ]
+    },
+    "Legislator.votesmartID": {
+      "description": "",
+      "aliases": [
+        "votesmart id"
+      ]
+    },
+    "Legislator.icpsrID": {
+      "description": "",
+      "aliases": [
+        "icpsr id"
+      ]
+    },
+    "Legislator.lastName": {
+      "description": "",
+      "aliases": [
+        "last name"
+      ]
+    },
+    "Legislator.democratCount": {
+      "description": "",
+      "aliases": [
+        "democrat count"
+      ]
+    },
+    "Legislator.otherCount": {
+      "description": "",
+      "aliases": [
+        "other count"
+      ]
+    },
+    "Legislator.thomasID": {
+      "description": "",
+      "aliases": [
+        "thomas id"
+      ]
+    },
+    "Legislator.birthday": {
+      "description": "",
+      "aliases": []
+    },
+    "Legislator.gender": {
+      "description": "",
+      "aliases": []
+    },
+    "Legislator.bioguideID": {
+      "description": "",
+      "aliases": [
+        "bioguide id"
+      ]
+    },
+    "Legislator.type": {
+      "description": "",
+      "aliases": []
+    },
+    "Legislator.district": {
+      "description": "",
+      "aliases": []
+    },
+    "Party.name": {
+      "description": "The name of the party.",
+      "aliases": [
+        "party name"
+      ]
+    },
+    "State.code": {
+      "description": "A unique identifier for the state.",
+      "aliases": [
+        "state code",
+        "state abbreviation"
+      ]
+    },
+    "Subject.title": {
+      "description": "The title of the subject.",
+      "aliases": [
+        "name",
+        "designation"
+      ]
+    },
+    "SERVES_ON.rank": {
+      "description": "The rank of the legislator in the committee, as an integer.",
+      "aliases": [
+        "position",
+        "level"
+      ]
+    },
+    "SPONSORED_BY.cosponsor": {
+      "description": "A boolean indicating whether the legislator is a cosponsor of the bill.",
+      "aliases": [
+        "cosponsor status",
+        "cosponsorship status"
+      ]
+    },
+    "VOTED_ON.vote": {
+      "description": "The vote cast by the legislator on the bill.",
+      "aliases": [
+        "voting"
+      ]
+    }
+  }
+}
