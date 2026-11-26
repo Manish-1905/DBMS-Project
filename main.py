@@ -550,6 +550,28 @@ def save_result(
 # MAIN BENCHMARK
 # ============================================================
 
+def stratified_sample(df, n, seed=0):
+    """
+    n questions, drawn at random but keeping the query_type proportions of
+    the whole set (the parquet is sorted by type, so --end N is NOT a fair
+    sample). Same (n, seed) -> same questions, so runs stay comparable.
+    """
+    if n >= len(df):
+        return df
+    if "query_type" not in df.columns:
+        return df.sample(n=n, random_state=seed).sort_index()
+    sizes = df["query_type"].value_counts()
+    quota = (sizes / sizes.sum() * n).round().astype(int)
+    # fix rounding so the quotas add up to exactly n
+    while quota.sum() != n:
+        diff = n - quota.sum()
+        k = (sizes / sizes.sum() * n - quota).idxmax() if diff > 0 else quota.idxmax()
+        quota[k] += 1 if diff > 0 else -1
+    parts = [df[df["query_type"] == t].sample(n=int(q), random_state=seed)
+             for t, q in quota.items() if q > 0]
+    return pd.concat(parts).sort_index()
+
+
 def run_benchmark(
     parquet_path: str,
     sqlite_path: str,
@@ -570,7 +592,9 @@ def run_benchmark(
     distractor_seed: int = 0,
     retriever: str = "bm25",
     embed_model: str = "BAAI/bge-small-en-v1.5",
-    embed_margin: float = 0.1
+    embed_margin: float = 0.1,
+    sample: Optional[int] = None,
+    sample_seed: int = 0
 ):
 
     if run_id is None:
@@ -630,15 +654,22 @@ def run_benchmark(
     # Optional subset
     # --------------------------------------------------------
 
-    if end_index is None:
-        end_index = len(df)
+    if sample:
+        df = stratified_sample(df, sample, sample_seed)
+        print(f"Stratified random sample: {len(df)} questions (seed {sample_seed})")
+        if "query_type" in df.columns:
+            print("  " + ", ".join(f"{k}={v}" for k, v in
+                                   df["query_type"].value_counts().items()))
+    else:
+        if end_index is None:
+            end_index = len(df)
 
-    df = df.iloc[start_index:end_index]
+        df = df.iloc[start_index:end_index]
 
-    print(
-        f"Processing rows "
-        f"{start_index} -> {end_index - 1}"
-    )
+        print(
+            f"Processing rows "
+            f"{start_index} -> {end_index - 1}"
+        )
 
     # --------------------------------------------------------
     # SQLite
@@ -986,8 +1017,19 @@ def main():
         "--end",
         type=int,
         default=None,
-        help="Ending row index (exclusive)"
+        help="Ending row index (exclusive). Rows are sorted by query type, "
+             "so use --sample for a representative subset"
     )
+
+    parser.add_argument(
+        "--sample",
+        type=int,
+        default=None,
+        help="Run N randomly chosen questions with the same query-type mix "
+             "as the full set (overrides --start/--end)"
+    )
+
+    parser.add_argument("--sample-seed", type=int, default=0)
 
     # Experiment settings
 
@@ -1095,7 +1137,11 @@ def main():
 
         embed_model=args.embed_model,
 
-        embed_margin=args.embed_margin
+        embed_margin=args.embed_margin,
+
+        sample=args.sample,
+
+        sample_seed=args.sample_seed
     )
 
 
