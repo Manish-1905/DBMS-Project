@@ -17,6 +17,7 @@ from semantic_layer import load_semantics, merge, rule_semantics
 from distractors import add_distractors
 from grounding import Grounder, prompt_text as grounding_prompt
 from value_index import load_catalog
+from cypher_guard import Guard, repair_feedback
 from query_ir import (IR_SYSTEM_PROMPT, SchemaInfo, compile_ir, feedback_text,
                       ir_user_prompt, parse_plan, validate)
 
@@ -151,7 +152,9 @@ CREATE TABLE IF NOT EXISTS benchmark_results (
 
     query_type TEXT,
 
-    retrieved_context TEXT
+    retrieved_context TEXT,
+
+    attempts TEXT
 
 );
 """
@@ -165,6 +168,7 @@ NEW_COLUMNS = {
     "raw_response": "TEXT",
     "query_type": "TEXT",
     "retrieved_context": "TEXT",
+    "attempts": "TEXT",
 }
 
 
@@ -333,6 +337,54 @@ def generate_with_plan(llama_url, model_name, question, prompt_schema, full_sche
     if status in ("ok", "ok_after_retry"):
         result["cypher"], result["params"] = compile_ir(plan, use_params=True)
     return result
+
+
+def run_with_repair(guard, cypher, params, max_repairs, repair_empty, llama_url,
+                    model_name, question, prompt_schema, grounding_block, grounded,
+                    full_schema, catalog):
+    """
+    Part 7.5: run the query through the guard; on failure (blocked, error, or
+    no rows) send the reasons back to the LLM and try again, up to
+    `max_repairs` times. Returns (execution, attempts, final_cypher, seconds).
+    """
+    attempts, seconds = [], 0.0
+    cur, cur_params = cypher, params or {}
+    for k in range(max_repairs + 1):
+        out = guard.run(cur, cur_params)
+        attempts.append({
+            "attempt": k, "cypher": cur, "params": cur_params, "stage": out["stage"],
+            "ok": out["ok"], "empty": out["empty"], "success": out["success"],
+            "error": out["error"], "failures": out["failures"],
+            "warnings": out["warnings"], "result": out["result"],
+            "n_rows": len(out["result"]) if out["result"] else 0,
+            "truncated": out["truncated"], "latency": out["latency"],
+        })
+        codes = " ".join(f["code"] for f in out["failures"]) or "-"
+        print(f"  attempt {k}: stage={out['stage']} ok={out['ok']} empty={out['empty']} "
+              f"failures={codes}")
+        needs = (not out["success"]) or bool(out["failures"]) or \
+            (out["empty"] and repair_empty)
+        if not needs or k == max_repairs:
+            break
+        feedback = repair_feedback(cur, out, full_schema, catalog, grounded)
+        user = build_user_prompt(question, prompt_schema,
+                                 "grounded" if grounding_block else "full_schema",
+                                 grounding=grounding_block) + "\n" + feedback
+        try:
+            obj, raw, sec = call_llm_json(llama_url, model_name, SYSTEM_PROMPT, user)
+        except Exception as e:                      # keep the last attempt
+            attempts[-1]["repair_note"] = f"repair call failed: {e}"
+            break
+        seconds += sec
+        new = str((obj or {}).get("Cypher") or "").strip()
+        if not new:
+            attempts[-1]["repair_note"] = "LLM gave no new query"
+            break
+        cur, cur_params = new, {}
+    last = attempts[-1]
+    execution = {"success": last["success"], "error": last["error"],
+                 "result": last["result"], "latency": last["latency"] or 0.0}
+    return execution, attempts, cur, seconds
 
 
 def generate_cypher(
@@ -567,10 +619,11 @@ INSERT INTO benchmark_results (
     run_id,
     raw_response,
     query_type,
-    retrieved_context
+    retrieved_context,
+    attempts
 
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 """
 
 
@@ -592,7 +645,8 @@ def save_result(
     run_id=None,
     raw_response=None,
     query_type=None,
-    retrieved_context=None
+    retrieved_context=None,
+    attempts=None
 ):
 
     conn.execute(
@@ -618,7 +672,8 @@ def save_result(
             run_id,
             raw_response,
             query_type,
-            retrieved_context
+            retrieved_context,
+            attempts
         )
     )
 
@@ -675,7 +730,9 @@ def run_benchmark(
     sample: Optional[int] = None,
     sample_seed: int = 0,
     values_file: Optional[str] = None,
-    ir_retries: int = 1
+    ir_retries: int = 1,
+    repair: Optional[int] = None,
+    repair_empty: bool = True
 ):
 
     if run_id is None:
@@ -684,6 +741,8 @@ def run_benchmark(
             tag += f"-{retriever}"
         if distractor_share and mode != "no_schema":
             tag += f"_noise{int(round(distractor_share * 100))}"
+        if repair is not None:
+            tag += f"_repair{repair}"
         run_id = f"{tag}_{time.strftime('%Y%m%d_%H%M%S')}"
 
     embedder = None
@@ -793,6 +852,21 @@ def run_benchmark(
 
     neo4j.verify_connection()
 
+    # Part 7 guard (only with --repair): one per graph, sharing the driver
+    guards = {}
+
+    def guard_for(ds, schema_text):
+        if ds not in guards:
+            guards[ds] = Guard(neo4j.driver, neo4j_database, schema_text,
+                               guard_catalog(ds), budget={"timeout_s": query_timeout})
+        return guards[ds]
+
+    def guard_catalog(ds):
+        path = values_file or f"values/{ds}.json"
+        if ds in grounder_catalogs:
+            return grounder_catalogs[ds]
+        return load_catalog(path) if os.path.exists(path) else None
+
     print("Neo4j connection successful.")
 
     # --------------------------------------------------------
@@ -811,6 +885,8 @@ def run_benchmark(
 
         question = str(row["question"])
         schema = str(row["schema"])
+        real_schema = schema
+        info = None
 
         benchmark_cypher = str(row["cypher"])
         dataset = str(row["data_source"])
@@ -948,7 +1024,18 @@ def run_benchmark(
 
         print("\nExecuting LLM Cypher...")
 
-        if llm_cypher:
+        attempts = None
+        if llm_cypher and repair is not None:
+            # Part 7: validate -> EXPLAIN -> execute -> repair with reasons
+            llm_execution, attempts, llm_cypher, extra_s = run_with_repair(
+                guard_for(dataset, real_schema), llm_cypher, llm_params, repair,
+                repair_empty, llama_url, model_name, question, schema,
+                grounding_block, info.get("grounding") if info else None,
+                real_schema, guard_catalog(dataset))
+            if generation_time is not None:
+                generation_time += extra_s
+
+        elif llm_cypher:
 
             llm_execution = neo4j.execute_query(
                 llm_cypher, llm_params
@@ -1063,7 +1150,9 @@ def run_benchmark(
 
             query_type=query_type,
 
-            retrieved_context=retrieved_context
+            retrieved_context=retrieved_context,
+
+            attempts=json.dumps(attempts, default=str) if attempts is not None else None
         )
 
         print("\nSaved to SQLite.")
@@ -1176,6 +1265,20 @@ def main():
     )
 
     parser.add_argument("--sample-seed", type=int, default=0)
+
+    parser.add_argument(
+        "--repair",
+        type=int,
+        default=None,
+        help="Part 7: check every query (policy, schema, values, EXPLAIN) before "
+             "running it, and repair failures up to N times (0 = check only)"
+    )
+
+    parser.add_argument(
+        "--no-repair-empty",
+        action="store_true",
+        help="with --repair: don't treat 'ran but returned no rows' as a failure"
+    )
 
     parser.add_argument(
         "--ir-retries",
@@ -1307,7 +1410,11 @@ def main():
 
         values_file=args.values_file,
 
-        ir_retries=args.ir_retries
+        ir_retries=args.ir_retries,
+
+        repair=args.repair,
+
+        repair_empty=not args.no_repair_empty
     )
 
 
