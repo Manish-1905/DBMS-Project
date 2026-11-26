@@ -52,3 +52,15 @@ def test_build_writes_file(er_schema, tmp_path):
     assert sem["sources"] == ["rules", "overrides"]
     assert sem["labels"]["User"]["description"] == "A viewer"
     assert "viewer" in sem["labels"]["User"]["aliases"]
+
+
+def test_overrides_replace_or_add_aliases():
+    sem = {"labels": {"Genre": {"description": "", "aliases": ["type", "category"]},
+                      "User": {"description": "", "aliases": ["person"]}},
+           "relationships": {}, "properties": {}}
+    out = sl.apply_overrides(sem, {"labels": {
+        "Genre": {"aliases": ["category", "Genres"]},
+        "User": {"add_aliases": ["viewer"], "description": "A viewer"}}})
+    assert out["labels"]["Genre"]["aliases"] == ["category", "genres"]   # "type" removed
+    assert out["labels"]["User"]["aliases"] == ["person", "viewer"]
+    assert out["labels"]["User"]["description"] == "A viewer"
