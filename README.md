@@ -11,6 +11,10 @@ question (+ schema) ──► llama.cpp LLM ──► Cypher ──► Neo4j (re
 | `main.py` | Runs the benchmark: generates Cypher, executes LLM + gold query, saves everything to SQLite |
 | `evaluate.py` | Reads the SQLite file and prints the metrics table |
 | `split.py` | Makes a smaller parquet containing only one graph's questions |
+| `schema_inspect.py` | **Part 3.** Extracts the schema, indexes, constraints and value statistics from the live Neo4j graph, with a `schema_version` hash |
+| `gold_schema.py` | **Part 4.4.** Lists the labels / relationship types / properties a gold Cypher query uses |
+| `schema_retriever.py` | **Part 4.** Picks only the part of the schema a question needs (BM25 + schema-graph shortest paths) |
+| `eval_retrieval.py` | **Part 4.4.** Benchmarks the retriever on its own (recall, context reduction); no LLM or Neo4j needed |
 | `Benchmark/MTQ-Auto/test.parquet` | MTQ questions (`question`, `schema`, `cypher`, `data_source`, ...) |
 | `Datasets/*.dump` | Neo4j database dumps (one per graph) |
 
@@ -86,7 +90,14 @@ uv run main.py --parquet Benchmark/MTQ-Auto/test.parquet --data-source er \
 # System B: LLM + full schema
 uv run main.py --parquet Benchmark/MTQ-Auto/test.parquet --data-source er \
   --mode full_schema --model Qwen2.5-Coder-1.5B --sqlite results.sqlite
+
+# System 2: LLM + retrieved schema (only the relevant labels/relationships)
+uv run main.py --parquet Benchmark/MTQ-Auto/test.parquet --data-source er \
+  --mode retrieved_schema --model Qwen2.5-Coder-1.5B --sqlite results.sqlite
 ```
+
+Each row also stores the MTQ `query_type` and, for `retrieved_schema`, which
+schema elements were retrieved (`retrieved_context` column).
 
 Useful flags: `--start 0 --end 5` (quick test on 5 questions), `--query-timeout 30`,
 `--run-id my_label`.
@@ -98,12 +109,47 @@ Useful flags: `--start 0 --end 5` (quick test on 5 questions), `--query-timeout 
 
 ```bash
 uv run evaluate.py --sqlite results.sqlite --rows-csv per_question.csv
+
+# also break results down by query type (simple/complex retrieval/aggregation, ...)
+uv run evaluate.py --sqlite results.sqlite --by-type
 ```
 
 Prints one row per run with: runnable, non-null, result correct, exact match, execution times,
 generation time. `per_question.csv` has every question with its error message, for error analysis.
 
 ---
+
+## 7. Schema extraction (Part 3)
+
+With a graph loaded in Neo4j:
+
+```bash
+uv run schema_inspect.py --out schemas/er.json --compare-mtq --data-source er
+```
+
+Prints `schema_version` (changes only when the *structure* changes) and how much
+of MTQ's schema was recovered (label / relationship / direction / property / type
+recall). The JSON also has `value_stats` (distinct counts, most common values,
+min/max), which entity/value grounding (Part 5) will use.
+
+## 8. Schema retrieval benchmark (Part 4)
+
+Runs offline on the parquet; no LLM or Neo4j needed:
+
+```bash
+uv run eval_retrieval.py                          # all 11 graphs
+uv run eval_retrieval.py --data-source er --csv retrieval_rows.csv
+uv run schema_retriever.py --data-source er --row 3   # inspect one question
+```
+
+First results on all 8,284 MTQ test questions (k_labels=3, k_rels=3):
+
+| | label recall | rel recall | prop recall | all needed elements kept | context reduction |
+|---|---|---|---|---|---|
+| ALL | 98.5% | 97.9% | 98.8% | 95.3% | 41.0% |
+
+Per-graph and per-query-type rows are printed by the script. The `missing`
+column in the CSV shows what the retriever dropped; use it to improve it.
 
 ## Safety notes
 
@@ -112,7 +158,8 @@ generation time. `per_question.csv` has every question with its error message, f
 
 ## Adding a new system (Parts 3–8 of the roadmap)
 
-1. Add a name to `MODES` in `main.py` (e.g. `retrieved_schema`).
+1. Add a name to `MODES` in `main.py` (e.g. `grounded`). See how
+   `retrieved_schema` is handled in `run_benchmark()` for an example.
 2. Add a branch in `build_user_prompt()` that builds that system's prompt.
 3. If you change the prompt text, bump `PROMPT_VERSION`.
 4. Run with `--mode <name>`; `evaluate.py` compares it with the others automatically.
