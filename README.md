@@ -293,6 +293,10 @@ uv run main.py --parquet Benchmark/MTQ-Auto/test-split.parquet --neo4j-database 
 uv run evaluate.py --sqlite plan.sqlite --by-feature --compare grounded ir
 ```
 
+`replay_plans.py` re-checks the plans an `ir` run already produced with the current
+checker and executes the newly valid ones (no LLM calls):
+`uv run replay_plans.py --sqlite plan.sqlite --neo4j-database $DB`
+
 `--by-feature` breaks results down by the gold query's hops (0/1/2/3+), filter,
 aggregation, sorting and multi-stage (`WITH`). For `ir` runs `evaluate.py` also
 shows what happened to each plan: `ok`, `ok_after_retry`, `invalid`,

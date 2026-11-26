@@ -104,3 +104,28 @@ def test_parse_plan_and_feedback():
     assert parse_plan({"Cypher": "MATCH ..."}) is None
     assert parse_plan({"plan": {"nodes": [1], "return": [1]}}) == {"nodes": [1], "return": [1]}
     assert "- label 'X' does not exist" in feedback_text(["label 'X' does not exist"], {})
+
+
+def test_label_names_used_as_variables_are_fixed(er_schema):
+    p = plan(paths=[{"from": "u", "rel": "WATCHED", "to": "m"},
+                    {"from": "m", "rel": "HAS", "to": "Genre"},
+                    {"from": "User", "rel": "USES", "to": "IpAddress"}],
+             **{"return": [{"expr": "Genre.name", "as": "genre"}]})
+    ir, errs, warns = validate(p, er_schema)
+    assert errs == [], errs
+    cypher, _ = compile_ir(ir)
+    assert "(m)-[:HAS]->(genre:Genre)" in cypher and "(u)-[:USES]->(ipAddress:IpAddress)" in cypher
+    assert "RETURN genre.name AS genre" in cypher
+
+
+@pytest.mark.parametrize("item,expected", [
+    ({"agg": "average", "expr": "m.year", "as": "x"}, "avg(m.year) AS x"),
+    ({"agg": "count_distinct", "expr": "u", "as": "x"}, "count(DISTINCT u) AS x"),
+    ({"expr": "count(DISTINCT u)", "as": "x"}, "count(DISTINCT u) AS x"),
+    ({"expr": "SUM(w.watchCount)", "as": "x"}, "sum(w.watchCount) AS x"),
+    ({"expr": "count(*)", "as": "x"}, "count(*) AS x"),
+])
+def test_aggregate_slips_are_fixed(er_schema, item, expected):
+    ir, errs, _ = validate(plan(**{"return": [item]}), er_schema)
+    assert errs == [], errs
+    assert compile_ir(ir)[0].endswith("RETURN " + expected)
