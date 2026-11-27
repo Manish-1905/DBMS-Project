@@ -21,3 +21,11 @@ Datasets/*.dump
 .pytest_cache/
 .DS_Store
 values/
+
+# LaTeX build files
+report/*.aux
+report/*.log
+report/*.out
+report/*.fls
+report/*.fdb_latexmk
+report/build.log
