@@ -36,11 +36,13 @@
   {\LARGE\bfseries ConText2Cypher}\\[0.3em]
   {\large Asking a graph database questions in plain English}\\[0.8em]
   Final Report\\[0.6em]
-  \begin{tabular}{@{}c@{\hspace{2.2em}}c@{\hspace{2.2em}}c@{}}
-  Triman Singh Tuteja & Kushagra Gupta & Saurabh Sharma\\[-0.2em]
-  {\small 2023EPB1283} & {\small 2024MCB1299} & {\small 2024MCB1311}\\[0.3em]
-  Manish Kumar Chatakunda & Ipsita Pandey & \\[-0.2em]
-  {\small 2024MCB1302} & {\small 2023EEB1210} &
+  \begin{tabular}{@{}c@{\hspace{2.4em}}c@{\hspace{2.4em}}c@{}}
+  Saurabh Sharma & Triman Singh Tuteja & Manish Kumar Chatakunda\\[-0.2em]
+  {\small 2024MCB1311} & {\small 2023EPB1283} & {\small 2024MCB1302}\\[0.35em]
+  \multicolumn{3}{c}{\begin{tabular}{@{}c@{\hspace{2.4em}}c@{}}
+  Kushagra Gupta & Ipsita Pandey\\[-0.2em]
+  {\small 2024MCB1299} & {\small 2023EEB1210}
+  \end{tabular}}
   \end{tabular}\\[0.6em]
   November 2026
 \end{center}
@@ -66,7 +68,7 @@ called \textbf{Cypher}. Most people cannot do that. Our goal was to let someone 
 question like \emph{``How many movies did female users from Ohio watch?''} and get the
 answer.
 
-Large language models (LLMs) can write Cypher (this task is called Text-to-Cypher~\cite{neo4j}),
+Large language models (LLMs) can write Cypher (this task is called Text-to-Cypher~\cite{neo4jdata,neo4jguide}),
 but they do not know \emph{your} graph.
 They do not know which labels and relationships exist, which way the relationships
 point, what the properties are called, or how values are stored (is it
@@ -95,8 +97,8 @@ a correct (``gold'') Cypher query, in five types: simple retrieval (224), simple
 aggregation (89), evaluation queries (225), complex retrieval (165) and complex
 aggregation (153).
 
-\textbf{Tools.} Neo4j~5, the model Qwen2.5-Coder-1.5B~\cite{qwen} run locally with
-llama.cpp~\cite{llamacpp}, and Python. Everything runs on one laptop, so the cost per
+\textbf{Tools.} Neo4j~5 with its Python driver~\cite{neo4jdriver}, the model
+Qwen2.5-Coder-1.5B~\cite{qwen} run locally with llama.cpp~\cite{llamacpp}, and Python. Everything runs on one laptop, so the cost per
 question is zero; we report time and token counts instead.
 
 \textbf{How we score.} We run both the generated query and the gold query and compare the
@@ -217,8 +219,9 @@ and relationships to the schema text, some of them with confusing names like
 \emph{UserProfile} or \emph{MovieReview}. Even when 95\% of the schema was fake (140
 elements), the retriever still kept everything needed for 99.3\% of questions while
 sending only 8.6\% of the text. A meaning-based (embedding) retriever did worse here
-(87.4\%), because \emph{UserProfile} means almost the same as \emph{User}; plain name
-matching tells them apart. Figure~\ref{fig:noise} shows what this means for the model on a
+(87.4\%; we used the BGE-small model~\cite{bge} through fastembed~\cite{fastembed}, and
+also a mix of both methods~\cite{rrf}), because \emph{UserProfile} means almost the same as
+\emph{User}; plain name matching tells them apart. Figure~\ref{fig:noise} shows what this means for the model on a
 set of 200 complex questions: with 80\% fake schema, the retrieved schema gave 12\%
 correct against 5\% for the full schema (16 questions gained, 2 lost, $p=0.001$). At 95\%
 both fell to about 7\%, which seems to be the floor for this model on complex questions.
@@ -237,7 +240,8 @@ stores \texttt{'Female'}. We built a \emph{value catalog} with every text value 
 graph, and a matcher that links words in the question to stored values: exact matches,
 different capitals, plurals (``comedies'' $\to$ \texttt{'Comedy'}), common alternatives
 (``USA'' $\to$ \texttt{'US'}, ``women'' $\to$ \texttt{'Female'}), typos
-(``Fanatsy'' $\to$ \texttt{'Fantasy'}) and shortened movie titles. The matched values are
+(``Fanatsy'' $\to$ \texttt{'Fantasy'}, using an edit distance where swapping two letters
+counts as one edit~\cite{damerau,rapidfuzz}) and shortened movie titles. The matched values are
 added to the prompt.
 
 On the benchmark questions this added only 1.1 points (\textbf{56.2\%}, not significant),
@@ -268,7 +272,7 @@ which path, which filters, which totals or averages. Our code checks the plan ag
 schema and the value catalog, fixes mistakes that have only one possible fix (wrong
 capitals, reversed direction, \texttt{'female'} instead of \texttt{'Female'}), sends other
 problems back to the model once, and then turns the plan into Cypher itself, so the syntax
-is always valid. If the plan cannot be made valid, the system falls back to S3.
+is always valid and values are passed as query parameters~\cite{cypher}. If the plan cannot be made valid, the system falls back to S3.
 
 Planning helped exactly where we hoped (Figure~\ref{fig:hops}): questions that follow two
 relationships went from 1\% to 32\% correct, and complex retrieval questions from 15\% to
@@ -299,8 +303,8 @@ these runs puts that at about 63\%, but it still has to be tested properly.
 The last layer, which we call the \emph{guard}, checks every query before it reaches the
 database: (1) is it safe, meaning read-only, a single statement, no admin commands, no
 endless paths; (2) do its labels, relationships, directions and properties exist; (3) do
-its values exist; (4) Neo4j's \texttt{EXPLAIN} checks the syntax and estimates the cost
-without running it; (5) it runs read-only with a time and row limit. If a query fails, the
+its values exist; (4) Neo4j's \texttt{EXPLAIN}~\cite{cypher} checks the syntax and estimates
+the cost without running it; (5) it runs read-only with a time and row limit. If a query fails, the
 model is told exactly \emph{why} (for example, ``the graph has
 (User)-[:WATCHED]$\to$(Movie)'' or ``the graph stores \texttt{'Female'}'') and may try again,
 up to two times.
@@ -449,19 +453,35 @@ wrong. Most importantly, when the graph changed, the graph-aware system kept wor
 static one failed completely. This supports our starting idea: a Text-to-Cypher system should
 read the current graph at question time instead of relying on what the model already knows.
 
-\begin{thebibliography}{9}
-\setlength{\itemsep}{0.1em}
+\begin{thebibliography}{99}
+\setlength{\itemsep}{0.15em}
 \small
 \bibitem{mtq} GraphML Lab. \emph{Mind the Query: A Comprehensive Benchmark for
-  Text-to-Cypher Generation.} EMNLP Industry Track, 2025.
-\bibitem{neo4j} Neo4j. \emph{Introducing the Neo4j Text2Cypher Dataset}, 2024; and
-  \emph{Cypher Manual}, neo4j.com/docs.
-\bibitem{qwen} Qwen Team. \emph{Qwen2.5-Coder Technical Report}, 2024.
-\bibitem{llamacpp} G.~Gerganov et al. \emph{llama.cpp}, github.com/ggml-org/llama.cpp.
+  Text-to-Cypher Generation.} EMNLP 2025 (Industry Track).
+  \url{https://aclanthology.org/2025.emnlp-industry.133/}
+\bibitem{neo4jdata} Neo4j. \emph{Introducing the Neo4j Text2Cypher Dataset}, 2024.
+  \url{https://neo4j.com/blog/developer/introducing-neo4j-text2cypher-dataset/}
+\bibitem{neo4jguide} Neo4j. \emph{Text2Cypher: Natural Language to Cypher}.
+  \url{https://neo4j.com/blog/genai/text2cypher-guide/}
+\bibitem{cypher} Neo4j. \emph{Cypher Manual} (query tuning with \texttt{EXPLAIN},
+  parameters). \url{https://neo4j.com/docs/cypher-manual/}
+\bibitem{neo4jdriver} Neo4j. \emph{Neo4j Python Driver Manual}.
+  \url{https://neo4j.com/docs/python-manual/}
+\bibitem{qwen} B.~Hui et al. \emph{Qwen2.5-Coder Technical Report.} arXiv:2409.12186, 2024.
+\bibitem{llamacpp} G.~Gerganov et al. \emph{llama.cpp: LLM inference in C/C++}.
+  \url{https://github.com/ggml-org/llama.cpp}
 \bibitem{bm25} S.~Robertson and H.~Zaragoza. \emph{The Probabilistic Relevance Framework:
-  BM25 and Beyond.} Foundations and Trends in Information Retrieval, 2009.
-\bibitem{mcnemar} Q.~McNemar. \emph{Note on the sampling error of the difference between
-  correlated proportions or percentages.} Psychometrika, 1947.
+  BM25 and Beyond.} Foundations and Trends in Information Retrieval, 3(4), 2009.
+\bibitem{bge} S.~Xiao et al. \emph{C-Pack: Packaged Resources To Advance General Chinese
+  Embedding} (BGE embedding models). arXiv:2309.07597, 2023.
+\bibitem{fastembed} Qdrant. \emph{FastEmbed}. \url{https://github.com/qdrant/fastembed}
+\bibitem{rrf} G.~V.~Cormack, C.~L.~A.~Clarke and S.~B\"uttcher. \emph{Reciprocal Rank Fusion
+  Outperforms Condorcet and Individual Rank Learning Methods.} SIGIR 2009.
+\bibitem{damerau} F.~J.~Damerau. \emph{A Technique for Computer Detection and Correction of
+  Spelling Errors.} Communications of the ACM, 7(3), 1964.
+\bibitem{rapidfuzz} M.~Bachmann. \emph{RapidFuzz}. \url{https://github.com/rapidfuzz/RapidFuzz}
+\bibitem{mcnemar} Q.~McNemar. \emph{Note on the Sampling Error of the Difference Between
+  Correlated Proportions or Percentages.} Psychometrika, 12(2), 1947.
 \end{thebibliography}
 
 \end{document}
