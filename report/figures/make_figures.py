@@ -33,12 +33,10 @@ def save(fig, name):
 # 1. Result accuracy by system (full 856 questions)
 systems = ["S0\nno schema", "S1\nfull schema", "S2\nretrieved\nschema", "S3\n+ value\ngrounding",
            "S5\n+ query\nplanning", "S7\n+ repair"]
-acc = [32.8, 51.5, 55.1, 56.2, 53.9]
+acc = [32.8, 51.5, 55.1, 56.2, 53.9, 54.7]
 fig, ax = plt.subplots(figsize=(6.4, 3.0))
-bars = ax.bar(range(5), acc, width=0.55, color=BLUE)
+bars = ax.bar(range(6), acc, width=0.55, color=BLUE)
 label_bars(ax, bars)
-ax.bar(5, 56, width=0.55, color="white", edgecolor=GRAY, hatch="///", linewidth=0.8)
-ax.text(5, 28, "pending", ha="center", va="center", fontsize=9, color=MUTED, rotation=90)
 ax.set_xticks(range(6), systems, fontsize=8.5)
 ax.set_ylim(0, 70)
 ax.set_ylabel("correct answers (%)")

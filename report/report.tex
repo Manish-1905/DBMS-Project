@@ -23,8 +23,6 @@
 \titlespacing*{\section}{0pt}{1.1em}{0.4em}
 \titlespacing*{\subsection}{0pt}{0.9em}{0.3em}
 
-% Values that are still missing (the S7 run is not finished yet)
-\newcommand{\TBD}{\colorbox{yellow!45}{\strut\,?\,}}
 
 \definecolor{boxblue}{HTML}{E8F1FC}
 \definecolor{boxline}{HTML}{257DE0}
@@ -44,7 +42,8 @@
   {\small 2024MCB1299} & {\small 2023EEB1210}
   \end{tabular}}
   \end{tabular}\\[0.6em]
-  November 2026
+  November 2026\\[0.3em]
+  {\small Code and results: \url{https://github.com/Manish-1905/DBMS-Project}}
 \end{center}
 
 \vspace{0.4em}
@@ -57,7 +56,8 @@ every query before it runs. On 856 questions this raised the share of correct an
 from \textbf{32.8\%} to \textbf{56.2\%}. When we changed the graph's values or renamed
 parts of its schema, a system that does not look at the graph fell to \textbf{0\%},
 while our graph-aware system stayed at about \textbf{28\%}. A safety layer blocked every
-harmful query, even when the model itself was willing to write them.}}
+harmful query, even when the model itself was willing to write them, and its checks let the
+full system answer 74\% of the questions with 73\% accuracy while flagging the rest.}}
 
 \section{The problem}
 
@@ -99,7 +99,8 @@ aggregation (153).
 
 \textbf{Tools.} Neo4j~5 with its Python driver~\cite{neo4jdriver}, the model
 Qwen2.5-Coder-1.5B~\cite{qwen} run locally with llama.cpp~\cite{llamacpp}, and Python. Everything runs on one laptop, so the cost per
-question is zero; we report time and token counts instead.
+question is zero; we report time and token counts instead. All code, the frozen test files
+and the result files are in our repository (link under the title).
 
 \textbf{How we score.} We run both the generated query and the gold query and compare the
 rows they return (column names are ignored, and row order only matters if the gold query
@@ -317,21 +318,28 @@ DELETE n''. The guard blocked all 7, and the graph had the same 1{,}237 nodes an
 relationships afterwards. \textbf{Safety has to come from the checking layer, not from the
 model.}
 
-\textbf{Repair and knowing when not to answer.} On 300 questions, repairs did not fix a single
-wrong answer. In 91\% of repair attempts the model simply returned the same query again; the
-small model could not follow the correction. But the guard turned out to be a very good
-judge of answers: when it found no problem, the answer was right \textbf{92\%} of the time;
-when it found any problem, the answer was wrong \textbf{98\%} of the time. So the system can
-answer only when the guard is happy and say ``I am not sure'' otherwise. That way it
-answered 62\% of the questions with 92\% accuracy, instead of answering everything with 58\%
-accuracy.
+\textbf{Repair.} Repair helped only a little. In a first test with S3 on 300 questions it
+fixed no wrong answers: in 91\% of repair attempts the model simply returned the same query
+again, so the small model could not follow the correction. In the full system (S7: plan +
+guard + repair, all 856 questions) the guard flagged 214 first attempts and repair fixed 6 of
+them (3\%). That is a small but real gain: 7 questions gained and none lost compared with S5
+($p=0.016$), and the lowest empty-result rate of all systems (4.4\%).
+
+\textbf{Knowing when not to answer.} The guard is better at \emph{judging} answers than the
+model is at fixing them. With S3 on 300 questions, answers the guard found no problem with were
+right \textbf{92\%} of the time, and flagged answers were wrong 98\% of the time. So the
+system can answer only when the guard is happy and say ``I am not sure'' otherwise: it then
+answered 62\% of the questions with 92\% accuracy instead of all of them with 58\%. In S7 the
+same rule answers 74\% of the questions with 73\% accuracy (instead of 54.7\%), and 97\% of
+the flagged answers are wrong. The signal is weaker there because planning already removes most
+of the errors the guard can see (syntax, names, directions); what is left are wrong paths and
+wrong totals, which look like valid queries.
 
 \section{Final evaluation}
 \label{sec:final}
 
 Table~\ref{tab:final} compares all systems on all 856 questions, measured the same way.
-Figure~\ref{fig:accuracy} shows the main number. The full system (S7) is still running, so
-its values are marked \TBD{} and will be added.
+Figure~\ref{fig:accuracy} shows the main number.
 
 \begin{table}[h]
 \centering\small
@@ -341,21 +349,25 @@ its values are marked \TBD{} and will be added.
  & S0 & S1 & S2 & S3 & S5 & S7 \\
  & no schema & full schema & retrieved & + values & + plan & + repair \\
 \midrule
-Query is valid Cypher & 86.7\% & 85.7\% & 85.6\% & 85.5\% & \textbf{90.1\%} & \TBD \\
-Schema used correctly & 36.1\% & 64.8\% & 70.2\% & 69.9\% & \textbf{82.6\%} & \TBD \\
-Right values used\textsuperscript{a} & 67.8\% & 77.5\% & 80.0\% & 83.7\% & \textbf{84.9\%} & \TBD \\
-Query ran & 86.7\% & 85.7\% & 85.5\% & 85.4\% & \textbf{89.0\%} & \TBD \\
-\textbf{Correct answer} & 32.8\% & 51.5\% & 55.1\% & \textbf{56.2\%} & 53.9\% & \TBD \\
-Ran but returned nothing & 38.3\% & 17.8\% & 14.8\% & 13.2\% & \textbf{6.4\%} & \TBD \\
-Time per question (s) & 3.0 & 2.7 & 2.6 & \textbf{2.4} & 5.0 & \TBD \\
-Tokens per question\textsuperscript{b} & -- & -- & 688 & 721 & 2{,}039 & \TBD \\
+Query is valid Cypher & 86.7\% & 85.7\% & 85.6\% & 85.5\% & 90.1\% & \textbf{90.8\%} \\
+Schema used correctly & 36.1\% & 64.8\% & 70.2\% & 69.9\% & \textbf{82.6\%} & 82.5\% \\
+Right values used\textsuperscript{a} & 67.8\% & 77.5\% & 80.0\% & 83.7\% & 84.9\% & \textbf{85.4\%} \\
+Query ran & 86.7\% & 85.7\% & 85.5\% & 85.4\% & \textbf{89.0\%} & 88.3\% \\
+\textbf{Correct answer} & 32.8\% & 51.5\% & 55.1\% & \textbf{56.2\%} & 53.9\% & 54.7\% \\
+Ran but returned nothing & 38.3\% & 17.8\% & 14.8\% & 13.2\% & 6.4\% & \textbf{4.4\%} \\
+Time per question (s) & 3.0 & 2.7 & 2.6 & \textbf{2.4} & 5.0 & 6.7 \\
+Tokens per question\textsuperscript{b} & -- & -- & \textbf{688} & 721 & 2{,}039 & 2{,}493 \\
 \midrule
-Paired test vs. previous & & $p<0.001$ & $p=0.001$ & $p=0.22$ & $p=0.19$ & \TBD \\
+Repair: flagged answers fixed & -- & -- & -- & -- & -- & 6 / 214 \\
+Answer only if guard is happy\textsuperscript{c} & -- & -- & -- & -- & -- & 74\% / 73\% \\
+\midrule
+Paired test vs.\ previous & & $p<0.001$ & $p=0.001$ & $p=0.22$ & $p=0.19$ & $p=0.016$ \\
 \bottomrule
 \end{tabular}
 \caption{All systems on the same 856 questions. Best value in each row in bold.
 \textsuperscript{a}Of the 515 questions whose correct query compares values.
-\textsuperscript{b}Only recorded for the runs made after token logging was added.}
+\textsuperscript{b}Only recorded for the runs made after token logging was added.
+\textsuperscript{c}Share of questions answered / accuracy of those answers.}
 \label{tab:final}
 \end{table}
 
@@ -370,7 +382,11 @@ Paired test vs. previous & & $p<0.001$ & $p=0.001$ & $p=0.22$ & $p=0.19$ & \TBD 
 is 1.7 times as many (S0 to S3). Queries that run but return nothing, the typical sign of a
 wrong name or value, fell from 38.3\% to 6.4\%. Using the schema correctly went from 36.1\%
 to 82.6\%. The biggest single gain comes from putting the graph's structure in the prompt
-(S0$\to$S1); retrieval adds a smaller but significant gain (S1$\to$S2).
+(S0$\to$S1); retrieval adds a smaller but significant gain (S1$\to$S2). Value grounding and
+planning do not change the total much on these questions, but they make the queries cleaner
+(fewer empty results, more valid schema use) and matter a lot when the graph changes. The full
+system S7 reaches 54.7\%, the fewest empty results (4.4\%) and the most valid queries
+(90.8\%), at almost three times the time per question of S3.
 
 Figure~\ref{fig:errors} shows \emph{what} goes wrong in each system. Without the schema,
 invented labels and relationships are the largest error. Any schema removes them completely.
@@ -411,7 +427,7 @@ Step & What we added & What it changed \\
 4 & Only the relevant schema (retrieval) & 55.1\% ($p=0.001$); keeps 99.3\% of what is needed even with 95\% fake schema \\
 5 & Value catalog and value matching & 56.2\%; after a value change: 0\% $\to$ 27.3\% \\
 6 & Plan, check, then compile to Cypher & Two-hop questions 1\% $\to$ 32\%; overall 53.9\% (not significant) \\
-7 & Guard: safety, checks, \texttt{EXPLAIN}, repair & 20/20 harmful queries blocked; 92\% accuracy on the 62\% it answers \\
+7 & Guard: safety, checks, \texttt{EXPLAIN}, repair & 20/20 harmful queries blocked; repair +7 answers ($p=0.016$), S7 = 54.7\%; answering only ``clean'' questions: 73--92\% accuracy \\
 Final & Schema-change test & Outdated schema 0\% vs. current schema 27.9\% \\
 \bottomrule
 \end{tabular}
@@ -427,8 +443,8 @@ Final & Schema-change test & Outdated schema 0\% vs. current schema 27.9\% \\
         system fell to 0\% after a value change or a schema change; the graph-aware system
         kept about 28\%.
   \item \textbf{Checking is easier than fixing.} The guard blocked every harmful query and
-        predicts very well which answers are wrong, but the small model could not use its
-        feedback to repair queries.
+        predicts well which answers are wrong, but the small model could use its feedback
+        to fix only 3\% of the flagged queries.
   \item \textbf{Planning helps with paths and hurts with totals.} It should be used only for
         questions that need it.
 \end{itemize}
@@ -454,8 +470,8 @@ static one failed completely. This supports our starting idea: a Text-to-Cypher 
 read the current graph at question time instead of relying on what the model already knows.
 
 \begin{thebibliography}{99}
-\setlength{\itemsep}{0.15em}
-\small
+\setlength{\itemsep}{0.05em}
+\footnotesize
 \bibitem{mtq} GraphML Lab. \emph{Mind the Query: A Comprehensive Benchmark for
   Text-to-Cypher Generation.} EMNLP 2025 (Industry Track).
   \url{https://aclanthology.org/2025.emnlp-industry.133/}
