@@ -1,4 +1,3 @@
-"""Part 3 exit criterion: deterministic schema, version changes with the schema."""
 import random
 
 import pytest

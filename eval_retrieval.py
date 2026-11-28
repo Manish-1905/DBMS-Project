@@ -1,20 +1,3 @@
-#!/usr/bin/env python3
-"""
-Benchmark the schema retriever on its own, before any LLM is involved.
-(Roadmap Part 4.4)
-
-For every question:
-    gold set      = labels / rel types / properties used by the gold Cypher
-    retrieved set = labels / rel types / properties in the pruned schema
-and we report recall (did we keep everything needed?) and how much
-smaller the context got.
-
-    uv run eval_retrieval.py --data-source er
-    uv run eval_retrieval.py                       # all graphs
-    uv run eval_retrieval.py --k-labels 5 --csv retrieval_rows.csv
-    uv run eval_retrieval.py --semantics-dir semantics   # with the semantic layer
-"""
-
 import argparse
 import csv
 import json
@@ -42,11 +25,6 @@ def recall(gold, got):
 
 
 def ranked_metrics(gold, ranked, prefix, ks=(1, 3, 5, 10)):
-    """
-    Recall@k = share of gold items in the top k of `ranked`;
-    MRR      = 1 / rank of the first gold item (0 if none is ranked).
-    A question with no gold items of this kind counts as 1.0.
-    """
     out = {}
     for k in ks:
         out[f"{prefix}_R@{k}"] = 1.0 if not gold else len(gold & set(ranked[:k])) / len(gold)
@@ -93,7 +71,6 @@ def main():
             sem_cache[ds] = load_semantics(ds, a.semantics_dir)
         full = schema_sets(r["schema"])
         gold = gold_schema_set(r["cypher"])
-        # only score elements that really exist in the schema (drops parser noise)
         gold = {k: gold[k] & full[k] for k in gold}
         pruned, info = retrieve(r["question"], r["schema"],
                                 k_labels=a.k_labels, k_rels=a.k_rels,

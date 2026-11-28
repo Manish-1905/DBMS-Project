@@ -1,30 +1,3 @@
-#!/usr/bin/env python3
-"""
-Value-grounding benchmark: realistic rewrites of how users type values.
-(Roadmap Part 5.4)
-
-For every ER question whose gold query compares a property with a value that
-the question mentions (e.g. 'Four Christmases', 'US', female), produce
-variants where only that mention changes. The graph and the gold query stay
-the same, so the correct answer stays the same:
-
-    original   ... watched 'Four Christmases' ...
-    lowercase  ... watched four christmases ...
-    unquoted   ... watched Four Christmases ...
-    typo       ... watched 'Four Chrsitmases' ...
-    partial    ... watched 'Bill Traylor' ...           (title shortened)
-    alias      ... users from 'USA' / from OH / women ...
-
-Output: Benchmark/MTQ-Auto/value_variants_er.parquet with the usual columns
-(question, schema, cypher, data_source, query_type) plus variant,
-original_question, target_property, target_value, surface.
-
-Deterministic (no randomness). Commit the parquet and don't regenerate it
-once evaluation has started ("freeze the benchmark").
-
-    uv run make_value_variants.py
-"""
-
 import argparse
 import re
 
@@ -33,7 +6,6 @@ import pandas as pd
 from gold_schema import gold_literals
 from grounding import _US_STATES
 
-# Values worth grounding (IP addresses, e-mails, phones are copied verbatim).
 TARGET_PROPS = ["Movie.title", "Genre.name", "User.country", "User.state",
                 "User.gender", "User.firstName", "User.lastName"]
 
@@ -49,7 +21,6 @@ ALIAS = {
 
 
 def find_mention(question, value):
-    """(start, end, quoted) of the value in the question, ignoring case."""
     m = re.search(r"(['\"])" + re.escape(value) + r"\1", question, re.IGNORECASE)
     if m:
         return m.start(), m.end(), True
@@ -60,7 +31,6 @@ def find_mention(question, value):
 
 
 def typo(value):
-    """Swap two neighbouring letters in the middle of the longest word."""
     words = value.split(" ")
     i = max(range(len(words)), key=lambda k: len(words[k]))
     w = words[i]
@@ -99,9 +69,9 @@ def variants_for(question, prop, value):
         return []
     start, end, quoted = pos
     surface = question[start + 1:end - 1] if quoted else question[start:end]
-    q = lambda s: f"'{s}'" if quoted else s           # keep the question's quoting
+    q = lambda s: f"'{s}'" if quoted else s
     out = [("original", question, surface)]
-    if surface.lower() != surface and len(surface) > 3:   # "us" would read as a word
+    if surface.lower() != surface and len(surface) > 3:
         out.append(("lowercase", question[:start] + surface.lower() + question[end:],
                     surface.lower()))
     if quoted:

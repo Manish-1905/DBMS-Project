@@ -1,4 +1,3 @@
-"""Part 7: guard (policy / schema / values), taxonomy, repair loop, security."""
 import json
 
 import pytest
@@ -36,7 +35,7 @@ def test_harmless_queries_pass_policy(q):
     ("MATCH (u:User)-[:WATCHED]->(m:Movie) RETURN m.releaseYear", ["F5"]),
     ("MATCH (m:Movie) WHERE m.year = '2000' RETURN m", ["F6"]),
     ("MATCH (u:User)-[:WATCHED]->(m:Movie) RETURN count(*)", []),
-    ("MATCH (u:User)-[:WATCHED]-(m:Movie) RETURN count(*)", []),      # undirected: fine
+    ("MATCH (u:User)-[:WATCHED]-(m:Movie) RETURN count(*)", []),
 ])
 def test_schema_check(er_schema, q, expected):
     assert codes(cg.schema_check(q, er_schema)) == expected
@@ -73,7 +72,6 @@ def test_repair_feedback_says_why(er_schema):
 
 
 class FakeGuard(cg.Guard):
-    """Guard with a fake database: rows only for the corrected query."""
     def __init__(self, schema, catalog=None):
         self.schema, self.catalog, self.budget = SchemaInfo(schema), catalog, dict(cg.DEFAULT_BUDGET)
 

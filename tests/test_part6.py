@@ -1,4 +1,3 @@
-"""Part 6: query plan (IR) validation, auto-fixes, compilation."""
 import pytest
 
 from query_ir import compile_ir, feedback_text, parse_plan, validate
@@ -31,7 +30,7 @@ def test_certain_mistakes_are_fixed(er_schema):
              filters=[{"expr": "u.Gender", "op": "=", "value": "female"}])
     ir, errs, warns = validate(p, er_schema, CAT)
     assert errs == []
-    assert len(warns) == 5          # label, rel, direction, property, value
+    assert len(warns) == 5
     cypher, params = compile_ir(ir)
     assert "(u:User)-[:WATCHED]->(m:Movie)" in cypher and params == {"p0": "Female"}
 

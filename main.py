@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import argparse
 import json
 import os
@@ -22,46 +20,21 @@ from query_ir import (IR_SYSTEM_PROMPT, SchemaInfo, compile_ir, feedback_text,
                       ir_user_prompt, parse_plan, validate)
 
 
-# ============================================================
-# CONFIGURATION
-# ============================================================
-
 DEFAULT_LLAMA_URL = "http://127.0.0.1:8080/v1/chat/completions"
 
 DEFAULT_NEO4J_URI = os.environ.get("NEO4J_URI", "neo4j://127.0.0.1:7687")
 DEFAULT_NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
-# Set NEO4J_PASSWORD in your shell instead of committing it to git.
 DEFAULT_NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "")
 DEFAULT_DB_PATH = "cypher_benchmark.sqlite"
 
-# Change this to whatever model name you expose from llama.cpp.
 DEFAULT_MODEL_NAME = "Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF"
 
-# Max seconds a single Cypher query may run before Neo4j kills it.
 DEFAULT_QUERY_TIMEOUT = 30
 
-# Which system is being tested (roadmap Part 2 / Part 8):
-#   no_schema   -> System 0 / A : question only
-#   full_schema -> System 1 / B : question + full graph schema
-#   retrieved_schema -> System 2 : question + only the relevant part of
-#                       the schema (see schema_retriever.py)
-#   grounded         -> System 3 : retrieved schema + the values in the graph
-#                       that the question refers to (see grounding.py)
-#   ir               -> System 4 : like grounded, but the LLM writes a query
-#                       PLAN that is checked against the schema and compiled
-#                       to Cypher (see query_ir.py); falls back to grounded
-#                       when the plan can't express the question
-# Later parts add new modes here (grounded, ...).
 MODES = ["no_schema", "full_schema", "retrieved_schema", "grounded", "ir"]
 
-# Bump this whenever you change SYSTEM_PROMPT or build_user_prompt,
-# so results from different prompts are never mixed up.
 PROMPT_VERSION = "v1"
 
-
-# ============================================================
-# PROMPT
-# ============================================================
 
 SYSTEM_PROMPT = r"""
 Imagine you are a user at a company that needs to present queries to
@@ -111,10 +84,6 @@ Return valid JSON only.
 """
 
 
-# ============================================================
-# SQLITE
-# ============================================================
-
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS benchmark_results (
 
@@ -163,8 +132,6 @@ CREATE TABLE IF NOT EXISTS benchmark_results (
 );
 """
 
-# Columns added after the first version of this script. Older .sqlite
-# files are upgraded automatically so old and new runs live together.
 NEW_COLUMNS = {
     "mode": "TEXT",
     "prompt_version": "TEXT",
@@ -198,22 +165,8 @@ def initialize_sqlite(db_path: str):
     return conn
 
 
-# ============================================================
-# LLAMA.CPP
-# ============================================================
-
 def build_user_prompt(question: str, schema: str, mode: str,
                       grounding: str = "") -> str:
-    """
-    Build the actual prompt sent to the LLM.
-
-    no_schema        : only the natural-language question.
-    full_schema      : question + the full graph schema.
-    retrieved_schema : question + the pruned schema (the caller passes the
-                       already-pruned schema in `schema`).
-    grounded         : retrieved_schema + a block listing the graph values
-                       the question refers to (`grounding`).
-    """
 
     if mode == "no_schema":
         return f"""
@@ -239,34 +192,20 @@ Return JSON only.
 
 
 def extract_json(text: str) -> Dict[str, Any]:
-    """
-    Attempts to extract valid JSON from the LLM response.
-
-    Handles cases where the model accidentally returns:
-
-    ```json
-    {...}
-    ```
-
-    or some extra text around the JSON.
-    """
 
     text = text.strip()
 
-    # Remove markdown code fences.
     text = re.sub(r"^```json\s*", "", text, flags=re.IGNORECASE)
     text = re.sub(r"^```\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
 
     text = text.strip()
 
-    # First attempt: entire response is JSON.
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
 
-    # Second attempt: find the first JSON object.
     start = text.find("{")
     end = text.rfind("}")
 
@@ -284,7 +223,6 @@ def extract_json(text: str) -> Dict[str, Any]:
     )
 
 
-# Tokens used by the LLM calls of the current question (Part 8: avg tokens).
 TOKENS = {"prompt": 0, "completion": 0}
 
 
@@ -296,7 +234,6 @@ def _count_tokens(data):
 
 def call_llm_json(llama_url, model_name, system, user, temperature=0.0,
                   max_tokens=1024, timeout=300):
-    """One chat call that must return JSON -> (parsed dict or None, raw, seconds)."""
     payload = {
         "model": model_name,
         "messages": [{"role": "system", "content": system},
@@ -320,11 +257,6 @@ def call_llm_json(llama_url, model_name, system, user, temperature=0.0,
 
 def generate_with_plan(llama_url, model_name, question, prompt_schema, full_schema,
                        grounding_block, catalog, retries=1):
-    """
-    Part 6: LLM -> plan (IR) -> validate (auto-fix certain mistakes; send the
-    others back to the LLM) -> compile to Cypher. Returns a dict with cypher,
-    params and what happened; cypher is None when the plan route failed.
-    """
     sch = SchemaInfo(full_schema)
     feedback, previous = "", None
     calls, seconds, raws = 0, 0.0, []
@@ -360,11 +292,6 @@ def generate_with_plan(llama_url, model_name, question, prompt_schema, full_sche
 def run_with_repair(guard, cypher, params, max_repairs, repair_empty, llama_url,
                     model_name, question, prompt_schema, grounding_block, grounded,
                     full_schema, catalog):
-    """
-    Part 7.5: run the query through the guard; on failure (blocked, error, or
-    no rows) send the reasons back to the LLM and try again, up to
-    `max_repairs` times. Returns (execution, attempts, final_cypher, seconds).
-    """
     attempts, seconds = [], 0.0
     cur, cur_params = cypher, params or {}
     for k in range(max_repairs + 1):
@@ -390,7 +317,7 @@ def run_with_repair(guard, cypher, params, max_repairs, repair_empty, llama_url,
                                  grounding=grounding_block) + "\n" + feedback
         try:
             obj, raw, sec = call_llm_json(llama_url, model_name, SYSTEM_PROMPT, user)
-        except Exception as e:                      # keep the last attempt
+        except Exception as e:
             attempts[-1]["repair_note"] = f"repair call failed: {e}"
             break
         seconds += sec
@@ -416,14 +343,6 @@ def generate_cypher(
     max_tokens: int = 1024,
     timeout: int = 300,
 ):
-    """
-    Send question (+ schema, depending on mode) to llama.cpp and return:
-
-        cypher
-        reason
-        generation_time
-        raw_response
-    """
 
     user_prompt = build_user_prompt(
         question=question,
@@ -450,8 +369,6 @@ def generate_cypher(
 
         "max_tokens": max_tokens,
 
-        # This is supported by llama.cpp's OpenAI-compatible server
-        # for models/configurations that support structured output.
         "response_format": {
             "type": "json_object"
         }
@@ -477,7 +394,6 @@ def generate_cypher(
     try:
         parsed = extract_json(raw_content)
     except ValueError:
-        # Keep the raw text so you can see *why* parsing failed.
         return {
             "cypher": None,
             "reason": None,
@@ -501,10 +417,6 @@ def generate_cypher(
         "raw_response": raw_content,
     }
 
-
-# ============================================================
-# NEO4J
-# ============================================================
 
 class Neo4jExecutor:
 
@@ -543,9 +455,6 @@ class Neo4jExecutor:
 
         try:
 
-            # READ_ACCESS: Neo4j refuses CREATE / DELETE / SET / MERGE,
-            # so an LLM-generated query can never damage the benchmark DB.
-            # timeout: runaway queries are killed instead of hanging.
             with self.driver.session(
                 database=self.database,
                 default_access_mode=READ_ACCESS
@@ -556,7 +465,6 @@ class Neo4jExecutor:
                     params or {}
                 )
 
-                # Consume the complete result.
                 records = result.data()
 
             latency = time.perf_counter() - start_time
@@ -584,17 +492,8 @@ class Neo4jExecutor:
         self.driver.close()
 
 
-# ============================================================
-# RESULT SERIALIZATION
-# ============================================================
-
 def serialize_result(result):
 
-    """
-    Convert Neo4j result into JSON-safe string.
-
-    SQLite stores it as TEXT.
-    """
 
     try:
         return json.dumps(
@@ -610,10 +509,6 @@ def serialize_result(result):
             ensure_ascii=False
         )
 
-
-# ============================================================
-# SQLITE INSERT
-# ============================================================
 
 INSERT_SQL = """
 INSERT INTO benchmark_results (
@@ -705,23 +600,13 @@ def save_result(
     conn.commit()
 
 
-# ============================================================
-# MAIN BENCHMARK
-# ============================================================
-
 def stratified_sample(df, n, seed=0):
-    """
-    n questions, drawn at random but keeping the query_type proportions of
-    the whole set (the parquet is sorted by type, so --end N is NOT a fair
-    sample). Same (n, seed) -> same questions, so runs stay comparable.
-    """
     if n >= len(df):
         return df
     if "query_type" not in df.columns:
         return df.sample(n=n, random_state=seed).sort_index()
     sizes = df["query_type"].value_counts()
     quota = (sizes / sizes.sum() * n).round().astype(int)
-    # fix rounding so the quotas add up to exactly n
     while quota.sum() != n:
         diff = n - quota.sum()
         k = (sizes / sizes.sum() * n - quota).idxmax() if diff > 0 else quota.idxmax()
@@ -776,7 +661,6 @@ def run_benchmark(
         embedder = get_embedder(embed_model)
     noisy_cache = {}
 
-    # Part 5: value catalog(s) for --mode grounded, loaded once per graph.
     grounders, grounder_states, grounder_catalogs = {}, {}, {}
 
     def get_grounder(ds):
@@ -800,9 +684,6 @@ def run_benchmark(
     print(f"mode={mode}  prompt={PROMPT_VERSION}  run_id={run_id}")
     print("=" * 70)
 
-    # --------------------------------------------------------
-    # Load Parquet
-    # --------------------------------------------------------
 
     print("\nLoading dataset:")
     print(f"  {parquet_path}")
@@ -828,15 +709,10 @@ def run_benchmark(
 
     print(f"Loaded {len(df)} rows.")
 
-    # Only keep questions for the graph currently loaded in Neo4j,
-    # otherwise gold queries for other graphs will "fail".
     if data_source:
         df = df[df["data_source"] == data_source].reset_index(drop=True)
         print(f"Kept {len(df)} rows with data_source='{data_source}'.")
 
-    # --------------------------------------------------------
-    # Optional subset
-    # --------------------------------------------------------
 
     if sample:
         df = stratified_sample(df, sample, sample_seed)
@@ -855,15 +731,9 @@ def run_benchmark(
             f"{start_index} -> {end_index - 1}"
         )
 
-    # --------------------------------------------------------
-    # SQLite
-    # --------------------------------------------------------
 
     sqlite_conn = initialize_sqlite(sqlite_path)
 
-    # --------------------------------------------------------
-    # Neo4j
-    # --------------------------------------------------------
 
     neo4j = Neo4jExecutor(
         uri=neo4j_uri,
@@ -877,7 +747,6 @@ def run_benchmark(
 
     neo4j.verify_connection()
 
-    # Part 7 guard (only with --repair): one per graph, sharing the driver
     guards = {}
 
     def guard_for(ds, schema_text):
@@ -894,9 +763,6 @@ def run_benchmark(
 
     print("Neo4j connection successful.")
 
-    # --------------------------------------------------------
-    # Benchmark
-    # --------------------------------------------------------
 
     total = len(df)
 
@@ -920,8 +786,6 @@ def run_benchmark(
             str(row["query_type"]) if "query_type" in row.index else None
         )
 
-        # Part 4.5: pad the schema with fake labels/relationships. Only the
-        # schema text changes; the graph and the gold query don't.
         semantics = load_semantics(dataset, semantics_dir)
         if distractor_share and mode != "no_schema":
             if schema not in noisy_cache:
@@ -931,7 +795,6 @@ def run_benchmark(
                 noisy_cache[schema] = (json.dumps(noisy), noisy_sem)
             schema, semantics = noisy_cache[schema]
 
-        # What schema the LLM actually sees depends on the mode.
         retrieved_context = None
         grounding_block = ""
         full_schema_text = schema
@@ -970,9 +833,6 @@ def run_benchmark(
         print("\nDataset:")
         print(dataset)
 
-        # ====================================================
-        # 1. LLM GENERATION
-        # ====================================================
 
         print("\nGenerating Cypher...")
 
@@ -996,7 +856,6 @@ def run_benchmark(
                              "raw_response": json.dumps(plan_result["raw"])}
                 llm_params = plan_result["params"]
             else:
-                # direct generation (all other modes, and the ir fallback)
                 generated = generate_cypher(
                     llama_url=llama_url,
                     model_name=model_name,
@@ -1044,15 +903,11 @@ def run_benchmark(
             generation_time = None
             raw_response = f"ERROR: {e}"
 
-        # ====================================================
-        # 2. EXECUTE LLM CYPHER
-        # ====================================================
 
         print("\nExecuting LLM Cypher...")
 
         attempts = None
         if llm_cypher and repair is not None:
-            # Part 7: validate -> EXPLAIN -> execute -> repair with reasons
             llm_execution, attempts, llm_cypher, extra_s = run_with_repair(
                 guard_for(dataset, real_schema), llm_cypher, llm_params, repair,
                 repair_empty, llama_url, model_name, question, schema,
@@ -1097,9 +952,6 @@ def run_benchmark(
                 llm_execution["error"]
             )
 
-        # ====================================================
-        # 3. EXECUTE BENCHMARK CYPHER
-        # ====================================================
 
         print("\nExecuting benchmark Cypher...")
 
@@ -1128,9 +980,6 @@ def run_benchmark(
                 benchmark_execution["error"]
             )
 
-        # ====================================================
-        # 4. SAVE EVERYTHING
-        # ====================================================
 
         save_result(
 
@@ -1187,9 +1036,6 @@ def run_benchmark(
 
         print("\nSaved to SQLite.")
 
-    # --------------------------------------------------------
-    # Cleanup
-    # --------------------------------------------------------
 
     neo4j.close()
     sqlite_conn.close()
@@ -1204,10 +1050,6 @@ def run_benchmark(
     )
 
 
-# ============================================================
-# CLI
-# ============================================================
-
 def main():
 
     parser = argparse.ArgumentParser(
@@ -1217,7 +1059,6 @@ def main():
         )
     )
 
-    # Dataset
 
     parser.add_argument(
         "--parquet",
@@ -1231,7 +1072,6 @@ def main():
         help="Output SQLite database"
     )
 
-    # llama.cpp
 
     parser.add_argument(
         "--llama-url",
@@ -1247,7 +1087,6 @@ def main():
         help="Model name used by llama.cpp"
     )
 
-    # Neo4j
 
     parser.add_argument(
         "--neo4j-uri",
@@ -1269,7 +1108,6 @@ def main():
         default="neo4j"
     )
 
-    # Dataset subset
 
     parser.add_argument(
         "--start",
@@ -1324,7 +1162,6 @@ def main():
              "(default values/<data_source>.json)"
     )
 
-    # Experiment settings
 
     parser.add_argument(
         "--mode",

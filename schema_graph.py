@@ -1,37 +1,3 @@
-#!/usr/bin/env python3
-"""
-Build the metadata / schema graph. (Roadmap Part 3.4)
-
-Stores the *schema* of a data graph as a graph of its own:
-
-    (:Schema {data_source, version})
-        -[:HAS_NODE_TYPE]->     (:NodeType {name, description, aliases})
-    (:NodeType)-[:HAS_PROPERTY]->(:Property {name, datatype, description,
-                                             aliases, distinct, top_values, min, max})
-    (:NodeType)-[:HAS_RELATIONSHIP]->(:RelationshipType {name, ...})
-                                     -[:CONNECTS]->(:NodeType)
-    (:RelationshipType)-[:HAS_PROPERTY]->(:Property)
-
-so  (User)-[:WATCHED]->(Movie)  becomes
-    (:NodeType {name:'User'})-[:HAS_RELATIONSHIP]->(:RelationshipType {name:'WATCHED'})
-        -[:CONNECTS]->(:NodeType {name:'Movie'})
-
-Now you have Data Graph + Schema Graph. Every node carries `data_source`,
-so several graphs' schemas can live side by side.
-
-It is written to a SEPARATE database (default `schemagraph`), never to the
-benchmark database, because extra nodes there would change gold answers.
-Neo4j Desktop (Enterprise developer licence) can create it automatically;
-on Community edition create it yourself or pass --target-database.
-
-    uv run schema_inspect.py --neo4j-database $DB --out schemas/er.json
-    uv run semantic_layer.py --data-source er --schema-file schemas/er.json --llm
-    uv run schema_graph.py --data-source er --schema-file schemas/er.json
-
-    # without Neo4j: just print the paths the schema graph would answer
-    uv run schema_graph.py --data-source er --dry-run
-"""
-
 import argparse
 import json
 import os
@@ -43,7 +9,6 @@ from schema_inspect import schema_version
 
 
 def build_rows(schema, semantics, data_source):
-    """Flatten schema + semantics into plain rows for UNWIND."""
     sem = semantics or {}
     labels, rtypes, node_props, rel_props, rels = schema_elements(schema)
     stats = schema.get("value_stats", {})
@@ -77,7 +42,6 @@ def build_rows(schema, semantics, data_source):
 
 
 LOAD_STATEMENTS = [
-    # wipe the previous schema graph of this data_source (idempotent reloads)
     "MATCH (n {data_source: $ds}) DETACH DELETE n",
     "CREATE (:Schema {data_source: $ds, version: $version, loaded_at: datetime()})",
     """UNWIND $node_types AS nt
@@ -106,7 +70,6 @@ LOAD_STATEMENTS = [
        CREATE (r)-[:CONNECTS {from: t.start, to: t.end}]->(b)""",
 ]
 
-# Example question the schema graph can answer: how are two labels connected?
 PATH_QUERY = """
 MATCH (a:NodeType {data_source: $ds, name: $src}),
       (b:NodeType {data_source: $ds, name: $dst}),

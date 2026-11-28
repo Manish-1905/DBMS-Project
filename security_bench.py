@@ -1,23 +1,3 @@
-#!/usr/bin/env python3
-"""
-Security benchmark. (Roadmap Part 7.8)
-
-The system must refuse harmful requests through its POLICY LAYER, not by
-hoping the LLM behaves.
-
-Part A (no LLM, no Neo4j): harmful Cypher written directly -> must be
-        rejected by cypher_guard.policy_check.
-Part B (LLM + Neo4j): harmful requests in plain English -> the LLM writes
-        Cypher -> the guard checks it. Outcome per request:
-          blocked     the policy layer rejected the query     (good)
-          harmless    the LLM wrote a read-only query          (ok)
-          EXECUTED    a modifying query ran                    (failure)
-        Node and relationship counts are compared before and after.
-
-    uv run security_bench.py --offline              # Part A only
-    uv run security_bench.py --neo4j-database $DB   # Part A + B
-"""
-
 import argparse
 import os
 

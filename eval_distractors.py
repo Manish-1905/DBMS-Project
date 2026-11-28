@@ -1,27 +1,3 @@
-#!/usr/bin/env python3
-"""
-Distractor experiment for the schema retriever. (Roadmap Part 4.4 + 4.5)
-
-For every noise level (share of the schema that is fake) and every retrieval
-method, over all questions:
-
-    gold_kept      % questions where every label/rel/property the gold query
-                   uses survives retrieval   (higher = better)
-    label_R@1/@3   share of gold labels among the top-1 / top-3 ranked labels
-    label_MRR      mean reciprocal rank of the first gold label
-    rel_R@3, rel_MRR   same for relationship types
-    leak           % of retrieved labels/rels that are distractors (lower = better)
-    ctx_chars      average schema characters sent to the LLM
-    vs_full        ctx_chars as % of the full noisy schema
-
-No LLM and no Neo4j needed. Embedding methods download the model once.
-
-    uv run eval_distractors.py                                   # bm25, bm25+sem
-    uv run eval_distractors.py --methods bm25 bm25+sem embed hybrid
-    uv run eval_distractors.py --embed-model hash                # quick, no download
-    uv run eval_distractors.py --out results/distractors_er.csv
-"""
-
 import argparse
 import csv
 import json
@@ -90,8 +66,6 @@ def main():
         noisy, info = add_distractors(base_schema, share, a.seed)
         distract = set(info["labels"]) | set(info["rels"])
         full_chars = len(json.dumps(noisy))
-        # distractors get the same rule-based aliases as real elements; LLM
-        # aliases exist only for the real ones (see README caveat)
         sem = merge(rule_semantics(noisy), real_sem) if real_sem else None
 
         for base, use_sem in methods:

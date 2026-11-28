@@ -1,24 +1,3 @@
-#!/usr/bin/env python3
-"""
-Evaluate value grounding on its own, without an LLM. (Roadmap Part 5.6)
-
-For every question (by default the value-variant benchmark), compare what
-grounding.py finds with the values the gold query uses:
-
-    verbatim      the exact stored value (same case) appears in the question:
-                  all a system WITHOUT grounding has to go on
-    target_R@1    the top-scored value for the target property is the gold value
-    target_R@5    the gold value is among the top 5 grounded values
-    all_resolved  every value the gold query compares with was grounded
-    wrong_value   a different value was grounded for the target property and
-                  the right one wasn't (would send the LLM the wrong way)
-    extra         average grounded values that the gold query doesn't use
-
-    uv run eval_grounding.py --values values/er.json
-    uv run eval_grounding.py --values values/er.json --parquet Benchmark/MTQ-Auto/test-split.parquet
-    uv run eval_grounding.py --values values/er.json --csv grounding_rows.csv
-"""
-
 import argparse
 import csv
 from collections import defaultdict

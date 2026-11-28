@@ -1,25 +1,3 @@
-#!/usr/bin/env python3
-"""
-Value catalog: every distinct text value stored in the graph. (Roadmap Part 5.2)
-
-The grounding step looks user phrases up in this catalog ("female" ->
-User.gender = 'Female'). It reflects the CURRENT graph state, so rebuild it
-whenever the data changes (that's the point of Part 5.5).
-
-    uv run value_index.py --neo4j-database $DB --out values/er.json
-
-Output:
-    {
-      "database": "neo4j",
-      "state_version": "<hash of all values>",   # changes when any value changes
-      "properties": {
-        "User.gender": {"distinct": 2, "values": {"Female": 25, "Male": 25}},
-        "Movie.title": {"distinct": 9125, "values": {...}},
-        "User.email":  {"distinct": 50000, "skipped": "too many distinct values"}
-      }
-    }
-"""
-
 import argparse
 import hashlib
 import json

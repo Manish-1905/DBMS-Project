@@ -1,31 +1,3 @@
-#!/usr/bin/env python3
-"""
-Validation, safe execution and failure classification for generated Cypher.
-(Roadmap Part 7.1-7.6)
-
-    generated Cypher
-      -> policy check   read-only, one statement, no admin/APOC calls,
-                        bounded variable-length paths              (F13, F12)
-      -> schema check   labels, relationship types and DIRECTION,
-                        properties, value types                    (F2-F6)
-      -> value check    compared values exist in the graph         (F7, F8)
-      -> EXPLAIN        Neo4j parses and plans it without running:
-                        syntax errors, unknown-name warnings, cost (F1, F12)
-      -> execute        read-only session, time budget, row cap    (F1, F6, F12, F13)
-      -> result         "empty" (no rows) is reported separately
-
-Failure taxonomy (roadmap 7.6). The guard can detect F1-F8, F12, F13 by
-itself; F9-F11 and F14 need the gold query (error_taxonomy.py):
-
-    F1  syntax error               F8  value mismatch
-    F2  nonexistent label          F9  incorrect traversal
-    F3  nonexistent relationship   F10 aggregation error
-    F4  wrong relationship direction  F11 temporal error
-    F5  nonexistent property       F12 performance failure
-    F6  wrong property type        F13 authorization (write / admin)
-    F7  entity resolution error    F14 semantic failure
-"""
-
 import re
 import time
 
@@ -41,7 +13,6 @@ TAXONOMY = {
     "F14": "semantic failure",
 }
 
-# Roadmap 7.2 budgets
 DEFAULT_BUDGET = {"timeout_s": 5.0, "max_rows": 10000, "max_path_depth": 5,
                   "max_estimated_rows": 10_000_000}
 
@@ -62,12 +33,7 @@ def failure(code, message):
     return {"code": code, "name": TAXONOMY[code], "message": message}
 
 
-# ------------------------------------------------------------
-# 7.1 static checks (no database needed)
-# ------------------------------------------------------------
-
 def policy_check(cypher, budget=None):
-    """Read-only, single statement, no admin calls, bounded paths."""
     b = {**DEFAULT_BUDGET, **(budget or {})}
     q = _STRINGS.sub("''", cypher or "")
     out = []
@@ -109,7 +75,6 @@ _CMP = re.compile(rf"({_IDENT})\s*\.\s*({_IDENT})\s*(=|<>|<=|>=|<|>)\s*"
 
 
 def schema_check(cypher, schema):
-    """Labels, relationship types, directions, properties and value types."""
     sch = schema if isinstance(schema, SchemaInfo) else SchemaInfo(schema)
     q = _STRINGS.sub("''", cypher or "")
     used = gold_schema_set(cypher)
@@ -130,7 +95,6 @@ def schema_check(cypher, schema):
             out.append(failure("F5", f"{owner} has no property '{prop}'"
                                      + (f" (did you mean {', '.join(sug)}?)" if sug else
                                         f"; its properties: {', '.join(sorted(props))}")))
-    # direction
     var_labels = _var_map(q)
     for m in _TRIPLE.finditer(q):
         la = {_clean(x) for x in re.findall(_IDENT, m.group(2) or "")} or \
@@ -139,7 +103,7 @@ def schema_check(cypher, schema):
             var_labels.get(_clean(m.group(7) or ""), set())
         types = {_clean(x) for x in re.findall(_IDENT, m.group(5))}
         left, right = m.group(3) == "<", m.group(6) == ">"
-        if left == right:          # undirected, or both arrows: nothing to check
+        if left == right:
             continue
         src, dst = (lb, la) if left else (la, lb)
         for t in types & sch.rel_types:
@@ -148,7 +112,6 @@ def schema_check(cypher, schema):
                     if (a, t, b) not in sch.triples and (b, t, a) in sch.triples:
                         out.append(failure("F4", f"({a})-[:{t}]->({b}) has the wrong "
                                                  f"direction; the graph has ({b})-[:{t}]->({a})"))
-    # value types
     for m in _CMP.finditer(cypher or ""):
         v, prop, lit = _clean(m.group(1)), _clean(m.group(2)), m.group(4)
         for owner in var_labels.get(v, ()):
@@ -166,7 +129,6 @@ def schema_check(cypher, schema):
 
 
 def value_check(cypher, catalog):
-    """Compared values must exist in the graph (catalog from value_index.py)."""
     props = (catalog or {}).get("properties", catalog or {})
     out = []
     for _, _, key, value in literal_spans(cypher or ""):
@@ -201,10 +163,6 @@ def static_check(cypher, schema, catalog=None, budget=None):
         value_check(cypher, catalog)
 
 
-# ------------------------------------------------------------
-# Database errors -> taxonomy
-# ------------------------------------------------------------
-
 def classify_db_error(message, code=""):
     t = f"{code} {message}"
     if re.search(r"SyntaxError|Invalid input|syntax error|Variable `\w+` not defined", t, re.I):
@@ -218,16 +176,11 @@ def classify_db_error(message, code=""):
     return "F1"
 
 
-# ------------------------------------------------------------
-# 7.3 EXPLAIN and 7.4 guarded execution
-# ------------------------------------------------------------
-
 _NOTE_CODES = {"UnknownLabelWarning": "F2", "UnknownRelationshipTypeWarning": "F3",
                "UnknownPropertyKeyWarning": "F5"}
 
 
 class Guard:
-    """Checks and runs generated Cypher against one database."""
 
     def __init__(self, driver, database, schema, catalog=None, budget=None):
         from neo4j import READ_ACCESS
@@ -238,7 +191,6 @@ class Guard:
         self.READ_ACCESS = READ_ACCESS
 
     def explain(self, cypher, params=None):
-        """(failures, warnings, estimated_rows) without executing the query."""
         from neo4j import Query
         try:
             with self.driver.session(database=self.database,
@@ -268,7 +220,6 @@ class Guard:
         return _dedupe(fails), warns, est
 
     def execute(self, cypher, params=None):
-        """Read-only run with time budget and row cap."""
         from neo4j import Query
         t0 = time.perf_counter()
         rows, truncated = [], False
@@ -290,14 +241,6 @@ class Guard:
                     "code": classify_db_error(msg, getattr(e, "code", "") or "")}
 
     def run(self, cypher, params=None):
-        """
-        Full pipeline. Returns
-          {"stage": "static"|"explain"|"execute"|"ok", "ok": bool,
-           "failures": [...], "warnings": [...], "empty": bool,
-           "success", "error", "result", "latency", "truncated", "estimated_rows"}
-        "ok" means it ran and returned rows. A query that fails a check is
-        NOT executed.
-        """
         out = {"stage": "static", "ok": False, "failures": [], "warnings": [],
                "empty": False, "success": False, "error": None, "result": None,
                "latency": None, "truncated": False, "estimated_rows": None}
@@ -320,16 +263,12 @@ class Guard:
             fails.append(failure(ex["code"], ex["error"]))
             out["failures"] = _dedupe(fails)
             return out
-        out["failures"] = fails            # schema/value problems that still ran
+        out["failures"] = fails
         out["empty"] = not ex["result"]
         out["ok"] = not out["empty"] and not fails
         out["stage"] = "ok" if out["ok"] else "execute"
         return out
 
-
-# ------------------------------------------------------------
-# 7.5 repair feedback ("tell it WHY the query failed")
-# ------------------------------------------------------------
 
 def repair_feedback(cypher, outcome, schema, catalog=None, grounded=None):
     sch = schema if isinstance(schema, SchemaInfo) else SchemaInfo(schema)

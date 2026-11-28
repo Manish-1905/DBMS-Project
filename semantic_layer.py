@@ -1,44 +1,3 @@
-#!/usr/bin/env python3
-"""
-Semantic layer for a graph schema. (Roadmap Part 3.2)
-
-For every node label, relationship type and property, store a short
-description and a list of aliases (other words a user might use):
-
-    {
-      "data_source": "er",
-      "schema_version": "46797f943d798546",
-      "labels":        {"Movie": {"description": "...", "aliases": ["film", ...]}},
-      "relationships": {"WATCHED": {"description": "...", "aliases": ["viewed", ...]}},
-      "properties":    {"Movie.year": {"description": "...", "aliases": ["release year"]}}
-    }
-
-The retriever uses aliases and descriptions, so a question about "films"
-can still find the `Movie` label.
-
-Three sources, merged in this order (later wins):
-    1. rules    - always on: split identifier names ("firstName" -> "first name")
-    2. llm      - optional (--llm): ask the local llama-server, one call per
-                  label / relationship type, with sample values if available
-    3. overrides - optional: a hand-written semantics/<data_source>.overrides.json
-                  for fixing mistakes. Per element:
-                    "description": "..."      replaces the description
-                    "aliases": [...]          REPLACES the alias list (drops bad ones)
-                    "add_aliases": [...]      adds to the alias list
-                  e.g. {"labels": {"Genre": {"aliases": ["category", "genres"]},
-                                   "User":  {"add_aliases": ["viewer"]}}}
-
-    # schema from the MTQ parquet (works for all 11 graphs, no Neo4j needed)
-    uv run semantic_layer.py --data-source er --llm
-
-    # schema from the live graph (includes sample values -> better descriptions)
-    uv run schema_inspect.py --neo4j-database $DB --out schemas/er.json
-    uv run semantic_layer.py --data-source er --schema-file schemas/er.json --llm
-
-    # every graph in the parquet
-    uv run semantic_layer.py --all --llm
-"""
-
 import argparse
 import json
 import re
@@ -53,12 +12,7 @@ DEFAULT_LLAMA_URL = "http://127.0.0.1:8080/v1/chat/completions"
 SEMANTICS_VERSION = "v1"
 
 
-# ------------------------------------------------------------
-# Loading schemas
-# ------------------------------------------------------------
-
 def load_schema(data_source, parquet=None, schema_file=None):
-    """Return the schema dict (MTQ format, maybe with value_stats)."""
     if schema_file:
         return json.loads(Path(schema_file).read_text())
     import pandas as pd
@@ -70,7 +24,6 @@ def load_schema(data_source, parquet=None, schema_file=None):
 
 
 def schema_elements(schema):
-    """Labels, relationship types and properties in a schema."""
     node_props = schema.get("node_props", {})
     rel_props = schema.get("rel_props", {})
     rels = schema.get("relationships", [])
@@ -78,10 +31,6 @@ def schema_elements(schema):
     rtypes = sorted({r["type"] for r in rels} | set(rel_props))
     return labels, rtypes, node_props, rel_props, rels
 
-
-# ------------------------------------------------------------
-# 1. Rules
-# ------------------------------------------------------------
 
 def _words(name):
     return " ".join(_split_ident(name))
@@ -114,10 +63,6 @@ def rule_semantics(schema):
                 "description": "", "aliases": [pw] if pw != p["property"].lower() else []}
     return out
 
-
-# ------------------------------------------------------------
-# 2. LLM
-# ------------------------------------------------------------
 
 SYSTEM_PROMPT = """You document graph database schemas for a search system.
 Given one element of a Neo4j graph schema and its context, return JSON only:
@@ -203,7 +148,7 @@ def llm_semantics(schema, llama_url, verbose=True):
         t0 = time.perf_counter()
         try:
             ans = _ask(llama_url, prompt)
-        except Exception as e:  # keep going; rules still cover this element
+        except Exception as e:
             print(f"  [{i}/{len(jobs)}] {name}: LLM failed ({e})")
             continue
         entry = {"description": str(ans.get("description", "")).strip(),
@@ -212,7 +157,7 @@ def llm_semantics(schema, llama_url, verbose=True):
         known = {p["property"] for p in
                  (node_props.get(name, []) if kind == "label" else rel_props.get(name, []))}
         for prop, pv in (ans.get("properties") or {}).items():
-            if prop in known and isinstance(pv, dict):  # drop invented properties
+            if prop in known and isinstance(pv, dict):
                 out["properties"][f"{name}.{prop}"] = {
                     "description": str(pv.get("description", "")).strip(),
                     "aliases": _clean_aliases(pv.get("aliases"), prop)}
@@ -221,10 +166,6 @@ def llm_semantics(schema, llama_url, verbose=True):
                   f"({time.perf_counter() - t0:.1f}s)")
     return out
 
-
-# ------------------------------------------------------------
-# Merge + save
-# ------------------------------------------------------------
 
 def merge(*layers):
     out = {"labels": {}, "relationships": {}, "properties": {}}
@@ -241,7 +182,6 @@ def merge(*layers):
 
 
 def apply_overrides(sem, overrides):
-    """Hand-written fixes: 'aliases' replaces, 'add_aliases' appends."""
     for section in ("labels", "relationships", "properties"):
         for name, v in (overrides or {}).get(section, {}).items():
             cur = sem[section].setdefault(name, {"description": "", "aliases": []})
@@ -284,7 +224,6 @@ def build(data_source, parquet, schema_file=None, use_llm=False,
 
 
 def load_semantics(data_source, sem_dir="semantics"):
-    """Used by the retriever / main.py. Returns None if there is no file."""
     if not sem_dir:
         return None
     path = Path(sem_dir) / f"{data_source}.json"
@@ -292,7 +231,7 @@ def load_semantics(data_source, sem_dir="semantics"):
 
 
 def main():
-    p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    p = argparse.ArgumentParser(description="Build the semantic layer (descriptions and aliases) for a graph schema.")
     p.add_argument("--data-source", help="MTQ data_source, e.g. er")
     p.add_argument("--all", action="store_true", help="every graph in the parquet")
     p.add_argument("--parquet", default="Benchmark/MTQ-Auto/test.parquet")
