@@ -1,378 +1,124 @@
 # ConText2Cypher
 
-Natural language → Cypher, evaluated by executing queries against MTQ graphs in Neo4j.
+Our DBMS course project. The idea is simple: you ask a question about a graph database in plain English, and the system writes the Cypher query for you and runs it on Neo4j.
 
-**Team:** Saurabh Sharma (2024MCB1311), Triman Singh Tuteja (2023EPB1283),
-Manish Kumar Chatakunda (2024MCB1302), Kushagra Gupta (2024MCB1299),
-Ipsita Pandey (2023EEB1210)
+The catch is that language models don't know your graph. They guess label names, get relationship directions backwards and use values that aren't in the data. So instead of just asking the model, we give it the parts of the graph it needs for each question (the relevant schema and the real stored values) and we check every query before it runs.
 
-**Final report:** [`report/report.pdf`](report/report.pdf) · results: [`results/`](results/)
+Everything runs locally on a laptop: Neo4j for the database and a small model (Qwen2.5-Coder 1.5B) through llama.cpp.
 
-```
-question (+ schema) ──► llama.cpp LLM ──► Cypher ──► Neo4j (read-only) ──► SQLite ──► evaluate.py
-```
+The full write-up is in [`report/report.pdf`](report/report.pdf).
 
-| File | What it does |
-|---|---|
-| `main.py` | Runs the benchmark: generates Cypher, executes LLM + gold query, saves everything to SQLite |
-| `evaluate.py` | Reads the SQLite file and prints the metrics table |
-| `split.py` | Makes a smaller parquet containing only one graph's questions |
-| `schema_inspect.py` | **Part 3.** Extracts the schema, indexes, constraints and value statistics from the live Neo4j graph, with a `schema_version` hash |
-| `gold_schema.py` | **Part 4.4.** Lists the labels / relationship types / properties a gold Cypher query uses |
-| `schema_retriever.py` | **Part 4.** Picks only the part of the schema a question needs (BM25 + schema-graph shortest paths) |
-| `semantic_layer.py` | **Part 3.2.** Descriptions + aliases for every label / relationship / property (rules, local LLM, hand-written overrides) → `semantics/<graph>.json` |
-| `schema_graph.py` | **Part 3.4.** Stores the schema itself as a graph (`NodeType`, `RelationshipType`, `Property`) in a separate Neo4j database |
-| `tests/` | `uv run pytest`: schema versioning, type names, gold-schema parser, retriever, semantic layer |
-| `eval_retrieval.py` | **Part 4.4.** Benchmarks the retriever on its own (recall, Recall@k, MRR, context reduction); no LLM or Neo4j needed |
-| `embedder.py` | **Part 4.2.** Embedding model for the `embed` / `hybrid` retrievers (fastembed, no PyTorch) |
-| `value_index.py` | **Part 5.2.** Catalog of every text value in the live graph (`values/<graph>.json`) with a `state_version` |
-| `grounding.py` | **Part 5.1–5.2.** Maps what the question says to stored values: exact / case / stem / alias / typo / fuzzy, with context checks |
-| `make_value_variants.py` | **Part 5.4.** Value-grounding benchmark: lowercase, unquoted, typo, partial-title and alias rewrites of ER questions |
-| `eval_grounding.py` | **Part 5.6.** Grounding accuracy per variant (no LLM) |
-| `graph_state.py` | **Part 5.5.** Copies the graph to a new database with recoded values (`'Female'`→`'F'` ...) and rewrites the gold queries |
-| `query_ir.py` | **Part 6.** Query plan (IR) format, schema/value checks with auto-fixes and error messages, compiler to parameterised Cypher |
-| `cypher_guard.py` | **Part 7.1–7.5.** Policy (read-only, bounded), schema (labels, relationships, direction, properties, types) and value checks, EXPLAIN, budgeted execution, repair feedback |
-| `error_taxonomy.py` | **Part 7.6.** Labels every wrong answer of any run with F1–F14 |
-| `security_bench.py` | **Part 7.8.** Harmful Cypher / harmful questions must be rejected by the policy layer |
-| `final_report.py` | **Part 8.** One table for all systems on the same questions: syntax/schema/entity/execution/result accuracy, empty rate, repair, selective answering, latency, tokens, paired tests |
-| `distractors.py` | **Part 4.5.** Adds fake-but-plausible labels/relationships to a schema at a chosen noise level |
-| `eval_distractors.py` | **Part 4.5.** Retrieval quality vs noise level, per retrieval method |
-| `Benchmark/MTQ-Auto/test.parquet` | MTQ questions (`question`, `schema`, `cypher`, `data_source`, ...) |
-| `Datasets/*.dump` | Neo4j database dumps, one per graph (not in git, see step 3) |
+**Team:** Saurabh Sharma (2024MCB1311), Triman Singh Tuteja (2023EPB1283), Manish Kumar Chatakunda (2024MCB1302), Kushagra Gupta (2024MCB1299), Ipsita Pandey (2023EEB1210)
 
----
+## Results in short
 
-## 1. Install the tools (once)
+We tested on the ER graph from the Mind the Query benchmark (856 questions with known correct answers).
 
-| Tool | Why | How |
+| System | What the model gets | Correct answers |
 |---|---|---|
-| Python 3.12 + **uv** | runs the scripts | `pip install uv` (or see docs.astral.sh/uv) |
-| **Neo4j 5.x** | the graph database | Docker (`neo4j:5`) **or** Neo4j Desktop |
-| **llama.cpp** | serves the LLM locally | prebuilt release from github.com/ggml-org/llama.cpp, or `brew install llama.cpp` |
+| S0 | just the question | 32.8% |
+| S1 | question + whole schema | 51.5% |
+| S2 | question + only the relevant schema | 55.1% |
+| S3 | S2 + the actual values from the graph | 56.2% |
+| S5 | S3, but the model writes a plan that we check and turn into Cypher | 53.9% |
+| S7 | S5 + checking and repairing queries before they run | 54.7% |
 
-## 2. Get the code and Python packages
+The more interesting part is what happens when the graph changes. When we changed stored values (like `'Female'` to `'F'`) or renamed parts of the schema, a system that doesn't look at the graph dropped to 0%, while ours stayed around 28%. Our checking layer also blocked every harmful query we tried (deletes, drops, admin commands), even when the model was happy to write them.
+
+More numbers are in the [`results/`](results/) folder.
+
+## Setup
+
+You need Python 3.12 with [uv](https://docs.astral.sh/uv/), Neo4j 5 (we used Neo4j Desktop) and llama.cpp (`brew install llama.cpp` on a Mac).
 
 ```bash
 git clone https://github.com/Manish-1905/DBMS-Project.git
 cd DBMS-Project
-uv sync            # creates .venv and installs neo4j, pandas, pyarrow, requests, duckdb
+uv sync
 ```
 
-## 3. Load a graph into Neo4j
+**Load the graph.** The database dump is too big for git, so get `entity-resolution-50.dump` from the Mind the Query release (or one of us) and put it in `Datasets/`. In Neo4j Desktop, create a DBMS, import the dump and start it. If the data ends up in a database that isn't called `neo4j`, pass its name with `--neo4j-database`.
 
-> The Neo4j dumps are **not** stored in git (too large). Get them from the
-> Mind the Query release (or a teammate) and put them in `Datasets/`
-> (ignored by git), e.g. `Datasets/entity-resolution-50.dump`.
-
-**Option A: Docker**
-
-```bash
-mkdir -p neo4j/data neo4j/dumps
-cp /path/to/entity-resolution-50.dump neo4j/dumps/neo4j.dump   # file name must be <dbname>.dump
-
-# load the dump into the "neo4j" database
-docker run --rm -v "$PWD/neo4j/data:/data" -v "$PWD/neo4j/dumps:/dumps" \
-  neo4j:5 neo4j-admin database load neo4j --from-path=/dumps --overwrite-destination=true
-
-# start the server
-docker run -d --name ctx2cypher -p 7474:7474 -p 7687:7687 \
-  -e NEO4J_AUTH=neo4j/choose_a_password \
-  -v "$PWD/neo4j/data:/data" neo4j:5
-```
-
-**Option B: Neo4j Desktop.** Create a DBMS → ⋯ → *Import* → pick the `.dump` file → start it.
-
-Check: open http://localhost:7474 and run `MATCH (n) RETURN labels(n), count(*)`. You should see nodes.
-
-If loading fails with a version error, use the Neo4j version the MTQ dumps were made with.
-
-**Switching graphs:** Neo4j Community has one user database, so stop the server, load another
-dump with the same command, and start again. With Desktop/Enterprise you can keep several
-databases and choose one with `--neo4j-database <name>`.
-
-## 4. Start the LLM server
+**Start the model** in its own terminal and leave it running:
 
 ```bash
 llama-server -hf Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF:Q4_K_M --port 8080 -c 8192
 ```
 
-`-c 8192` gives room for long schemas in the prompt. Check it's up: http://127.0.0.1:8080
+Use `-c 16384` if you run the noisy-schema experiments, since those prompts get long.
 
-## 5. Run the benchmark
+**Set your Neo4j details** in the terminal you'll run things from:
 
 ```bash
-export NEO4J_PASSWORD=choose_a_password      # Windows PowerShell: $env:NEO4J_PASSWORD="..."
-
-uv run split.py --list                       # see which graphs (data_source) exist
-
-# System A: LLM only (no schema)
-uv run main.py --parquet Benchmark/MTQ-Auto/test.parquet --data-source er \
-  --mode no_schema --model Qwen2.5-Coder-1.5B --sqlite results.sqlite
-
-# System B: LLM + full schema
-uv run main.py --parquet Benchmark/MTQ-Auto/test.parquet --data-source er \
-  --mode full_schema --model Qwen2.5-Coder-1.5B --sqlite results.sqlite
-
-# System 2: LLM + retrieved schema (only the relevant labels/relationships)
-uv run main.py --parquet Benchmark/MTQ-Auto/test.parquet --data-source er \
-  --mode retrieved_schema --model Qwen2.5-Coder-1.5B --sqlite results.sqlite
+export NEO4J_PASSWORD=your_password
+export DB=neo4j
 ```
 
-Each row also stores the MTQ `query_type` and, for `retrieved_schema`, which
-schema elements were retrieved (`retrieved_context` column).
+## Running it
 
-Useful flags: `--start 0 --end 5` (quick test on 5 questions), `--query-timeout 30`,
-`--run-id my_label`.
+`main.py` runs one system over the questions and saves everything (generated query, results, timings) to a SQLite file. The `--mode` flag picks the system:
 
-`--data-source` must match the graph currently loaded in Neo4j, or the gold queries will fail.
-`--model` is just the label saved in the results; llama-server serves whatever model it loaded.
+| Mode | System |
+|---|---|
+| `no_schema` | S0 |
+| `full_schema` | S1 |
+| `retrieved_schema` | S2 |
+| `grounded` | S3 (needs the value catalog, see below) |
+| `ir` | S5 |
+| add `--repair 2` | S7 |
 
-## 6. Get the metrics
+A quick test on 5 questions:
 
 ```bash
-uv run evaluate.py --sqlite results.sqlite --rows-csv per_question.csv
+uv run main.py --parquet Benchmark/MTQ-Auto/test-split.parquet --neo4j-database $DB --mode retrieved_schema --sample 5 --sqlite test.sqlite
+uv run evaluate.py --sqlite test.sqlite
+```
 
-# also break results down by query type (simple/complex retrieval/aggregation, ...)
+Drop `--sample` to run all 856 questions. If you want a smaller set, use `--sample N` rather than `--end N`, because the file is sorted by question type and `--end` would only give you the hardest ones.
+
+For `grounded` and `ir` you first need the list of values stored in the graph:
+
+```bash
+uv run value_index.py --neo4j-database $DB --out values/er.json
+```
+
+### Looking at results
+
+```bash
 uv run evaluate.py --sqlite results.sqlite --by-type
+uv run evaluate.py --sqlite results.sqlite --compare grounded ir
+uv run error_taxonomy.py --sqlite results.sqlite --values values/er.json
 ```
 
-Prints one row per run with: runnable, non-null, result correct, exact match, execution times,
-generation time. `per_question.csv` has every question with its error message, for error analysis.
+`--compare` checks whether the difference between two runs is real or just luck (a paired McNemar test). `error_taxonomy.py` sorts the wrong answers by what went wrong (syntax error, wrong direction, made-up property and so on).
 
----
+`final_report.py` puts several runs side by side in one table, which is what we used for the report.
 
-## 7. Schema extraction (Part 3)
+## Other experiments
 
-With a graph loaded in Neo4j:
+* **Schema retrieval on its own:** `eval_retrieval.py` checks whether the retriever keeps everything a question needs. It doesn't need Neo4j or the model.
+* **Noisy schema:** `eval_distractors.py` adds fake labels and relationships to the schema to see how retrieval holds up. `main.py --distractor-share 0.8` does the same for a full run.
+* **Changed graph:** `graph_state.py` copies the graph into a new database and changes its values or renames parts of its schema, then rewrites the correct answers to match. Your original database isn't touched.
+* **Safety:** `security_bench.py` throws harmful queries and requests at the system and checks that none of them get through. Add `--offline` to skip the model and database.
 
-```bash
-uv run schema_inspect.py --out schemas/er.json --compare-mtq --data-source er
-```
+## What's where
 
-Prints `schema_version` (changes only when the *structure* changes) and how much
-of MTQ's schema was recovered (label / relationship / direction / property / type
-recall). The JSON also has `value_stats` (distinct counts, most common values,
-min/max), which entity/value grounding (Part 5) will use.
+* `main.py`: runs a system over the questions
+* `evaluate.py`, `final_report.py`, `error_taxonomy.py`: scoring and comparing runs
+* `schema_inspect.py`, `semantic_layer.py`, `schema_graph.py`: reading the schema from Neo4j and adding descriptions and other names for labels
+* `schema_retriever.py`, `embedder.py`: picking the relevant part of the schema
+* `value_index.py`, `grounding.py`: matching words in the question to values in the graph
+* `query_ir.py`: the query plan format, its checks and the plan-to-Cypher compiler
+* `cypher_guard.py`: safety and correctness checks before a query runs, plus repair
+* `graph_state.py`, `distractors.py`: building the changed-graph and noisy-schema setups
+* `Benchmark/MTQ-Auto/`: the questions, plus the variants we made
+* `semantics/`: descriptions and other names for the ER schema
+* `results/`: results from each stage of the project
+* `report/`: the final report and the script that draws its charts
+* `tests/`: run them with `uv run pytest`
 
-### Semantic layer (Part 3.2)
+## Notes
 
-Aliases let the retriever match words that aren't in the schema ("films" → `Movie`).
-Needs llama-server running (same command as step 4):
+Generated queries always run in a read-only session with a time limit, so a bad query can't change the database. With `--repair`, the checking layer also rejects anything that writes, drops or reads files before it reaches Neo4j.
 
-```bash
-uv run schema_inspect.py --neo4j-database $DB --out schemas/er.json      # adds sample values
-uv run semantic_layer.py --data-source er --schema-file schemas/er.json --llm
-uv run semantic_layer.py --all --llm                                     # all 11 graphs, from the parquet
-```
-
-Review `semantics/er.json`. To fix it, edit `semantics/<graph>.overrides.json`
-and re-run: per element, `"aliases"` replaces the list (use it to drop bad ones),
-`"add_aliases"` adds to it, `"description"` replaces it. See `semantics/er.overrides.json`.
-Commit the `semantics/` folder: it is part of the benchmark setup.
-`main.py --mode retrieved_schema` uses `semantics/<graph>.json` automatically when it exists.
-
-### Schema graph (Part 3.4)
-
-```bash
-uv run schema_graph.py --data-source er --schema-file schemas/er.json
-```
-
-Writes to a separate database `schemagraph` (created automatically in Neo4j Desktop),
-never to the benchmark database. Explore it in Neo4j Browser with `:use schemagraph`.
-
-### Tests
-
-```bash
-uv run pytest -q
-```
-
-## 8. Schema retrieval benchmark (Part 4)
-
-Runs offline on the parquet; no LLM or Neo4j needed:
-
-```bash
-uv run eval_retrieval.py                          # all 11 graphs
-uv run eval_retrieval.py --data-source er --csv retrieval_rows.csv
-uv run schema_retriever.py --data-source er --row 3   # inspect one question
-```
-
-Results on all 8,284 MTQ test questions (k_labels=3, k_rels=3):
-
-| Retriever | label recall | rel recall | prop recall | all needed elements kept | context reduction |
-|---|---|---|---|---|---|
-| v1 | 98.5% | 97.9% | 98.8% | 95.3% | 41.0% |
-| v2 (fixed plural/verb matching) | 99.1% | 98.2% | 99.3% | 96.3% | 39.3% |
-
-Compare with the semantic layer: `uv run eval_retrieval.py --semantics-dir semantics`.
-The table also has ranked metrics (label/relationship Recall@k and MRR).
-
-### Retrieval methods (Part 4.2)
-
-`--method bm25` (keywords, default), `embed` (embedding similarity with
-`BAAI/bge-small-en-v1.5` via fastembed; ~130 MB downloaded on first use) or
-`hybrid` (both, fused by reciprocal rank). `--embed-margin` (default 0.1) keeps
-only elements whose similarity is within that of the best match.
-
-### Distractor experiment (Part 4.5)
-
-Pads the schema with fake labels/relationships (only the schema text; Neo4j is
-untouched) at 40/60/80/95% noise and measures retrieval:
-
-```bash
-uv run distractors.py --share 0.8                  # see what gets added
-uv run eval_distractors.py --methods bm25 bm25+sem embed+sem hybrid+sem
-```
-
-With the LLM (full noisy schema vs retrieved schema), e.g. 300 questions at 80% noise.
-Use `--sample N`, not `--end N`: the parquet is sorted by query type, so the first
-N rows are all complex questions. `--sample` keeps the query-type mix and always
-picks the same questions for the same N and `--sample-seed`.
-
-```bash
-uv run main.py --parquet Benchmark/MTQ-Auto/test-split.parquet --neo4j-database $DB \
-  --mode full_schema --distractor-share 0.8 --sample 300 --sqlite noise.sqlite
-uv run main.py --parquet Benchmark/MTQ-Auto/test-split.parquet --neo4j-database $DB \
-  --mode retrieved_schema --distractor-share 0.8 --sample 300 --sqlite noise.sqlite
-uv run evaluate.py --sqlite noise.sqlite --compare full_schema_noise80 retrieved_schema_noise80
-```
-
-`--compare` pairs the two runs question by question and gives a McNemar p-value
-(is the difference more than chance?).
-
-At 95% noise the full schema is ~17k characters: start llama-server with `-c 16384`.
-Results: `results/step4_er_retrieval.md`.
-
-Per-graph and per-query-type rows are printed by the script. The `missing`
-column in the CSV shows what the retriever dropped; use it to improve it.
-
-## 9. Entity and value grounding (Part 5)
-
-`--mode grounded` = retrieved schema + the graph values the question refers to
-("female" → `User.gender = 'Female'`), added to the prompt.
-
-```bash
-uv run value_index.py --neo4j-database $DB --out values/er.json        # value catalog
-uv run grounding.py --values values/er.json "female users from ohio"   # try it
-uv run eval_grounding.py --values values/er.json                       # 5.4 benchmark, no LLM
-```
-
-LLM runs on the value-variant benchmark (`Benchmark/MTQ-Auto/value_variants_er.parquet`,
-frozen; regenerate only with `make_value_variants.py`):
-
-```bash
-uv run main.py --parquet Benchmark/MTQ-Auto/value_variants_er.parquet --neo4j-database $DB \
-  --mode retrieved_schema --sample 300 --sqlite grounding.sqlite
-uv run main.py --parquet Benchmark/MTQ-Auto/value_variants_er.parquet --neo4j-database $DB \
-  --mode grounded --sample 300 --sqlite grounding.sqlite
-uv run evaluate.py --sqlite grounding.sqlite --compare retrieved_schema grounded
-```
-
-### Graph-state experiment (Part 5.5)
-
-Same questions and schema, but the stored values change. See `graph_state.py` for states B and C.
-
-```bash
-uv run graph_state.py create --source $DB --target erstateb --state B   # copy + recode (original untouched)
-uv run value_index.py --neo4j-database erstateb --out values/er_stateB.json
-uv run graph_state.py rewrite-gold --state B --affected-only \
-  --out Benchmark/MTQ-Auto/test-split-stateB.parquet
-uv run main.py --parquet Benchmark/MTQ-Auto/test-split-stateB.parquet --neo4j-database erstateb \
-  --mode retrieved_schema --sqlite state.sqlite
-uv run main.py --parquet Benchmark/MTQ-Auto/test-split-stateB.parquet --neo4j-database erstateb \
-  --mode grounded --values-file values/er_stateB.json --sqlite state.sqlite
-uv run evaluate.py --sqlite state.sqlite --compare retrieved_schema grounded
-```
-
-`evaluate.py` now also reports `empty`: queries that ran but returned no rows, the
-typical symptom of a wrong value.
-
-## 10. Query planning (Part 6)
-
-`--mode ir` (System 4 / E4): the LLM writes a JSON query **plan** instead of Cypher.
-The plan is checked against the schema and the value catalog; certain mistakes
-are fixed automatically (case, relationship direction, `'female'`→`'Female'`),
-the rest go back to the LLM with the reasons (`--ir-retries`, default 1). A valid
-plan is compiled to Cypher by code (always valid syntax, values as parameters).
-Questions the plan format can't express fall back to `grounded` generation.
-
-```bash
-uv run main.py --parquet Benchmark/MTQ-Auto/test-split.parquet --neo4j-database $DB \
-  --mode ir --sample 300 --sqlite plan.sqlite
-uv run main.py --parquet Benchmark/MTQ-Auto/test-split.parquet --neo4j-database $DB \
-  --mode grounded --sample 300 --sqlite plan.sqlite
-uv run evaluate.py --sqlite plan.sqlite --by-feature --compare grounded ir
-```
-
-`replay_plans.py` re-checks the plans an `ir` run already produced with the current
-checker and executes the newly valid ones (no LLM calls):
-`uv run replay_plans.py --sqlite plan.sqlite --neo4j-database $DB`
-
-`--by-feature` breaks results down by the gold query's hops (0/1/2/3+), filter,
-aggregation, sorting and multi-stage (`WITH`). For `ir` runs `evaluate.py` also
-shows what happened to each plan: `ok`, `ok_after_retry`, `invalid`,
-`unsupported`, `parse_error` (the last three used the fallback).
-
-## 11. Validation, repair and security (Part 7)
-
-`--repair N` works with every mode: each generated query goes through the guard
-(policy → schema/value checks → `EXPLAIN` → read-only execution with a time
-limit and a row cap). If it is blocked, fails, or returns no rows, the LLM gets
-the reasons and the context to fix it (correct direction, existing values, the
-database error) and tries again, up to N times. All attempts are saved.
-
-```bash
-uv run main.py --parquet Benchmark/MTQ-Auto/test-split.parquet --neo4j-database $DB \
-  --mode grounded --repair 2 --sample 300 --sqlite repair.sqlite
-uv run evaluate.py --sqlite repair.sqlite --by-attempt        # initial / +1 / +2 repairs
-uv run error_taxonomy.py --sqlite results.sqlite --values values/er.json   # F1–F14 for any run
-uv run security_bench.py --neo4j-database $DB                 # or --offline
-```
-
-`--repair 0` checks without repairing; `--no-repair-empty` stops "no rows" from
-counting as a failure.
-
-## 12. Final evaluation (Part 8)
-
-```bash
-uv run final_report.py \
-  --run S0=results.sqlite:no_schema --run S1=results.sqlite:full_schema \
-  --run S2=results.sqlite:retrieved_schema --run S3=plan.sqlite:grounded \
-  --run S5=plan.sqlite:ir --run S7=repair.sqlite:grounded_repair2 \
-  --out results/final_table.md
-```
-
-Only questions answered by every listed run are used, so all systems are compared
-on the same questions. New runs also record LLM tokens (`prompt_tokens`,
-`completion_tokens` columns).
-
-### Schema-change experiment (roadmap 8.4, "G3")
-
-`graph_state.py` state `R` renames `Genre`→`Category`, `WATCHED`→`VIEWED`,
-`Movie.title`→`Movie.name` in a copy of the graph. Compare a system that still
-believes the old schema with one that reads the current schema:
-
-```bash
-uv run graph_state.py create --source $DB --target erschema --state R
-uv run graph_state.py rewrite-gold --state R --affected-only --keep-schema --out Benchmark/MTQ-Auto/test-split-R-stale.parquet
-uv run graph_state.py rewrite-gold --state R --affected-only --out Benchmark/MTQ-Auto/test-split-R-live.parquet
-uv run main.py --parquet Benchmark/MTQ-Auto/test-split-R-stale.parquet --neo4j-database erschema \
-  --mode retrieved_schema --semantics-dir "" --sample 150 --run-id stale_schema --sqlite schema.sqlite
-uv run main.py --parquet Benchmark/MTQ-Auto/test-split-R-live.parquet --neo4j-database erschema \
-  --mode retrieved_schema --semantics-dir "" --sample 150 --run-id live_schema --sqlite schema.sqlite
-uv run evaluate.py --sqlite schema.sqlite --compare stale_schema live_schema
-```
-
-## Safety notes
-
-* LLM queries run in a **read-only session** with a timeout, so a generated `DELETE` cannot wipe the graph.
-* With `--repair`, the policy layer (`cypher_guard.py`) also rejects writes, admin commands,
-  external file access, database switching and unbounded paths **before** anything runs.
-* The password comes from `NEO4J_PASSWORD`; don't hard-code it.
-
-## Adding a new system (Parts 3–8 of the roadmap)
-
-1. Add a name to `MODES` in `main.py` (e.g. `grounded`). See how
-   `retrieved_schema` is handled in `run_benchmark()` for an example.
-2. Add a branch in `build_user_prompt()` that builds that system's prompt.
-3. If you change the prompt text, bump `PROMPT_VERSION`.
-4. Run with `--mode <name>`; `evaluate.py` compares it with the others automatically.
+Keep your password in `NEO4J_PASSWORD` rather than in the code.
