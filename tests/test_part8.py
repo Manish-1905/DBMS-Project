@@ -1,4 +1,3 @@
-"""Part 8: final report helpers, schema-change state (G3), token counting."""
 import json
 
 import main

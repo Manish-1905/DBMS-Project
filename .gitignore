@@ -1,4 +1,3 @@
-# Python-generated files
 __pycache__/
 *.py[oc]
 build/
@@ -6,14 +5,11 @@ dist/
 wheels/
 *.egg-info
 
-# Virtual environments
 .venv
 
-# Local secrets and Neo4j data folders
 .env
 neo4j/
 
-# Results and local data
 *.sqlite
 *.csv
 schemas/
@@ -22,7 +18,6 @@ Datasets/*.dump
 .DS_Store
 values/
 
-# LaTeX build files
 report/*.aux
 report/*.log
 report/*.out

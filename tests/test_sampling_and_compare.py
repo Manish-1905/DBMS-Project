@@ -6,7 +6,6 @@ from main import stratified_sample
 
 
 def _df():
-    # sorted by type, like the MTQ parquet
     types = ["complex"] * 60 + ["simple"] * 30 + ["eval"] * 10
     return pd.DataFrame({"question": [f"q{i}" for i in range(100)], "query_type": types})
 

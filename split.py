@@ -1,11 +1,3 @@
-"""
-Make a smaller parquet with only the questions for one graph.
-
-    python split.py --source er
-    python split.py --source hca --out Benchmark/MTQ-Auto/test-hca.parquet
-    python split.py --list          # show available data_source values
-"""
-
 import argparse
 
 import duckdb

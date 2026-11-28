@@ -1,24 +1,3 @@
-#!/usr/bin/env python3
-"""
-Replay saved query plans with the current checker. (Part 6 analysis)
-
-Takes the plans the LLM already wrote in an `--mode ir` run (first attempt,
-from the raw responses in the SQLite file), validates them again with the
-current query_ir.py, executes the ones that are now valid (read-only) and
-compares with the gold results already stored. No LLM calls.
-
-Use it to see what a checker change would have done without re-running the
-benchmark. Questions whose first plan is still invalid keep the outcome of the
-original run (retry / fallback), so the new total is an estimate.
-
-    uv run replay_plans.py --sqlite plan.sqlite --neo4j-database $DB
-
-With a direct-generation run of the same questions in the same file
-(--direct grounded), it also estimates routing rules that decide per question,
-from the plan itself, whether to use the plan or direct generation. Both
-outcomes are real executions; only the choice is simulated.
-"""
-
 import argparse
 import json
 import os
@@ -80,7 +59,7 @@ def main():
             if x["run_id"] == direct_runs[0]:
                 e = evaluate_row(x)
                 direct[(e["question"], e["gold_cypher"])] = e["result_correct"]
-    per_q = []      # (plan valid?, plan correct, n_paths, has_agg, direct correct)
+    per_q = []
 
     trans = Counter()
     old_ok = new_ok = 0
@@ -98,7 +77,7 @@ def main():
                 new_status = "ok"
                 plan_info = (len(fixed.get("paths") or []),
                              bool(fixed.get("with")) or any(x.get("agg") for x in fixed["return"]))
-                if old_status != "ok":            # newly valid: execute it
+                if old_status != "ok":
                     cypher, params = compile_ir(fixed)
                     res = ex.execute_query(cypher, params)
                     gold = json.loads(r["benchmark_cypher_result"] or "null") or {}

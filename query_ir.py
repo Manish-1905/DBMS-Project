@@ -1,38 +1,3 @@
-#!/usr/bin/env python3
-"""
-Graph Query IR: plan first, then Cypher. (Roadmap Part 6.1-6.3)
-
-The LLM fills in a structured plan instead of writing Cypher. The plan is
-checked against the schema (and the value catalog), auto-fixed where the fix
-is certain, and compiled to Cypher by plain code, so the syntax is always
-valid and values are passed as parameters.
-
-IR format (all keys except "nodes" and "return" are optional):
-
-{
-  "nodes":    [{"var": "u", "label": "User"}, {"var": "m", "label": "Movie"}],
-  "paths":    [{"from": "u", "rel": "WATCHED", "to": "m", "var": "w"}],
-  "filters":  [{"expr": "u.gender", "op": "=", "value": "Female"},
-               {"or": [{"expr": "m.year", "op": ">", "value": 2000},
-                       {"expr": "m.title", "op": "STARTS WITH", "value": "The"}]}],
-  "with": {                                   # one intermediate aggregation
-     "group_by":   [{"expr": "u"}, {"expr": "u.state", "as": "state"}],
-     "aggregates": [{"agg": "count", "expr": "m", "distinct": true, "as": "nMovies"}],
-     "having":     [{"expr": "nMovies", "op": ">", "value": 5}]
-  },
-  "return":   [{"expr": "u.state", "as": "state"},
-               {"agg": "avg", "expr": "nMovies", "as": "avgMovies"}],
-  "distinct": false,
-  "order_by": [{"expr": "avgMovies", "desc": true}],
-  "limit":    10
-}
-
-Grouping follows Cypher: non-aggregated return items are the group keys.
-Questions the IR can't express (OPTIONAL MATCH, several MATCH stages, CASE,
-sub-queries...) make the LLM answer {"unsupported": true}; main.py then falls
-back to direct Cypher generation.
-"""
-
 import difflib
 import json
 import re
@@ -48,7 +13,6 @@ class IRError(Exception):
     pass
 
 
-# Words small models use for aggregates -> (aggregate, distinct)
 AGG_SYNONYMS = {
     "average": ("avg", False), "mean": ("avg", False), "total": ("sum", False),
     "minimum": ("min", False), "maximum": ("max", False), "number": ("count", False),
@@ -60,11 +24,6 @@ _AGG_IN_EXPR = re.compile(r"^\s*([A-Za-z_]+)\s*\(\s*(DISTINCT\s+)?([^()]*?)\s*\)
 
 
 def _normalise_agg(item, warnings, where):
-    """
-    Certain fixes for aggregate items: synonyms ("average" -> avg,
-    "count_distinct" -> count + distinct) and Cypher written into "expr"
-    ("count(DISTINCT m)" -> agg count, expr m, distinct).
-    """
     m = _AGG_IN_EXPR.match(str(item.get("expr") or ""))
     if m and not item.get("agg"):
         name = m.group(1).lower()
@@ -94,7 +53,6 @@ def _close(word, options, n=3):
 
 
 def _fix_case(word, options):
-    """Exact match, or a unique case-insensitive match."""
     if word in options:
         return word
     m = [o for o in options if o.lower() == str(word).lower()]
@@ -115,25 +73,15 @@ class SchemaInfo:
         self.rel_types = {t for _, t, _ in self.triples} | set(self.rel_props)
 
 
-# ------------------------------------------------------------
-# Validation (6.2)
-# ------------------------------------------------------------
-
 def validate(ir, schema, catalog=None):
-    """
-    Check an IR against the schema (and the value catalog, if given).
-    Returns (fixed_ir, errors, warnings). Errors are written to be shown to
-    the LLM ("why it failed"); warnings are certain automatic fixes.
-    """
     sch = schema if isinstance(schema, SchemaInfo) else SchemaInfo(schema)
-    ir = json.loads(json.dumps(ir))          # deep copy
+    ir = json.loads(json.dumps(ir))
     errors, warnings = [], []
     cat = (catalog or {}).get("properties", catalog or {})
 
     if not isinstance(ir, dict):
         return ir, ["the plan must be a JSON object"], warnings
 
-    # ---- nodes ----
     var_label = {}
     nodes = ir.get("nodes") or []
     if not nodes:
@@ -158,12 +106,7 @@ def validate(ir, schema, catalog=None):
             n["label"] = fixed
         var_label[v] = fixed
 
-    # ---- label names used instead of variables (a common slip) ----
     def resolve_var(name, where, declare=True):
-        """
-        "Genre" used where a variable is expected: use the variable declared
-        with that label if there is exactly one; otherwise declare one.
-        """
         if name in var_label or not isinstance(name, str):
             return name
         label = _fix_case(name, sch.node_props)
@@ -188,7 +131,6 @@ def validate(ir, schema, catalog=None):
             p[end] = resolve_var(p.get(end), f"paths[{i}].{end}")
 
     def resolve_expr_label(e, where):
-        """'Movie.title' where Movie is a label, not a variable -> 'm.title'."""
         m = _EXPR.match(str(e or ""))
         if m and m.group(1) not in var_label:
             v = resolve_var(m.group(1), where, declare=False)
@@ -211,7 +153,6 @@ def validate(ir, schema, catalog=None):
             _normalise_agg(a, warnings, f"with.aggregates[{i}]")
             a["expr"] = resolve_expr_label(a.get("expr"), f"with.aggregates[{i}]")
 
-    # ---- paths ----
     rel_var_type = {}
     parent = {v: v for v in var_label}
 
@@ -263,9 +204,7 @@ def validate(ir, schema, catalog=None):
                       + " | ".join(", ".join(g) for g in groups.values())
                       + "; add a path between them")
 
-    # ---- expressions ----
     def check_expr(e, where, aliases=(), allow_star=False):
-        """Returns the (possibly fixed) expression string or None."""
         if e == "*" and allow_star:
             return e
         m = _EXPR.match(str(e or ""))
@@ -301,7 +240,6 @@ def validate(ir, schema, catalog=None):
         return f"{v}.{fixed}"
 
     def check_value(expr, op, value, where):
-        """Value-catalog check for exact comparisons on text properties."""
         if not cat or op not in ("=", "<>", "IN") or "." not in str(expr):
             return value
         v, prop = expr.split(".")
@@ -361,10 +299,9 @@ def validate(ir, schema, catalog=None):
     for i, f in enumerate(ir.get("filters") or []):
         check_filter(f, f"filters[{i}]")
 
-    # ---- with (one intermediate aggregation) ----
     stage_aliases = set()
     kept_vars = set()
-    group_map = {}          # "u.state" -> "state"
+    group_map = {}
     w = ir.get("with")
     if w:
         for i, g in enumerate(w.get("group_by") or []):
@@ -395,14 +332,12 @@ def validate(ir, schema, catalog=None):
             elif str(h.get("op", "")).upper() not in OPS - {"IN"}:
                 errors.append(f"with.having[{i}]: operator {h.get('op')!r} not allowed")
 
-    # ---- return ----
     ret = ir.get("return") or []
     if not ret:
         errors.append('"return" is empty')
     aliases_out = set()
 
     def check_after_with(e, where):
-        """After 'with' only the kept variables and the with-aliases exist."""
         if not w:
             return check_expr(e, where, allow_star=True)
         if e in stage_aliases or e == "*":
@@ -472,12 +407,7 @@ def _check_agg(a, where, check_expr, errors):
         a["expr"] = e
 
 
-# ------------------------------------------------------------
-# Compilation (6.3)
-# ------------------------------------------------------------
-
 def compile_ir(ir, use_params=True):
-    """IR (already validated) -> (cypher, params)."""
     params = {}
 
     def val(v):
@@ -545,10 +475,6 @@ def compile_ir(ir, use_params=True):
         out.append(f"LIMIT {int(ir['limit'])}")
     return " ".join(out), params
 
-
-# ------------------------------------------------------------
-# Prompting (6.1)
-# ------------------------------------------------------------
 
 IR_SYSTEM_PROMPT = r"""
 You plan graph database queries. Do NOT write Cypher. Fill in a JSON query
@@ -620,7 +546,6 @@ def feedback_text(errors, previous):
 
 
 def parse_plan(obj):
-    """LLM output (dict) -> plan dict, or None if unsupported/empty."""
     if not isinstance(obj, dict):
         return None
     if obj.get("unsupported"):

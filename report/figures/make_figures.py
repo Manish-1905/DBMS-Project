@@ -1,4 +1,3 @@
-"""Figures for the final report. All numbers come from results/*.md and report_outputs.txt."""
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -30,7 +29,6 @@ def save(fig, name):
     plt.close(fig)
 
 
-# 1. Result accuracy by system (full 856 questions)
 systems = ["S0\nno schema", "S1\nfull schema", "S2\nretrieved\nschema", "S3\n+ value\ngrounding",
            "S5\n+ query\nplanning", "S7\n+ repair"]
 acc = [32.8, 51.5, 55.1, 56.2, 53.9, 54.7]
@@ -42,7 +40,6 @@ ax.set_ylim(0, 70)
 ax.set_ylabel("correct answers (%)")
 save(fig, "fig_accuracy.pdf")
 
-# 2. LLM under schema noise (complex-question subset, n = 200)
 noise = ["0% fake", "80% fake", "95% fake"]
 full, retr = [11.0, 5.0, 7.0], [15.0, 12.0, 7.5]
 fig, ax = plt.subplots(figsize=(5.2, 2.8))
@@ -57,7 +54,6 @@ ax.set_ylabel("correct answers (%)")
 ax.legend(loc="upper right", fontsize=8.5)
 save(fig, "fig_noise.pdf")
 
-# 3. Graph changes: values (G2) and schema (G3)
 fig, (a1, a2) = plt.subplots(1, 2, figsize=(6.4, 2.9), gridspec_kw={"width_ratios": [3, 2]})
 v = a1.bar([0, 1, 2], [28.1, 0.0, 27.3], width=0.55, color=[GRAY, ORANGE, BLUE])
 label_bars(a1, v, pad=0.6)
@@ -79,7 +75,6 @@ fig.tight_layout(rect=(0, 0.07, 1, 1))
 fig.savefig("fig_change.pdf", bbox_inches="tight")
 plt.close(fig)
 
-# 4. Direct generation (S3) vs query planning (S5) by number of hops (856 questions)
 hops = ["0 hops\n(313)", "1 hop\n(360)", "2 hops\n(165)", "3+ hops\n(18)"]
 s3, s5 = [97, 49, 1, 0], [71, 51, 32, 28]
 fig, ax = plt.subplots(figsize=(5.4, 2.8))
@@ -94,11 +89,10 @@ ax.set_ylabel("correct answers (%)")
 ax.legend(loc="upper right", fontsize=8.5)
 save(fig, "fig_hops.pdf")
 
-# 5. What happens to each question: correct vs error type (share of all 856)
 cats = ["correct", "syntax error", "label/relationship\ndoes not exist", "wrong direction",
         "property does\nnot exist", "wrong path", "wrong aggregation", "other"]
 colors = [BLUE, ORANGE, AQUA, YELLOW, MAGENTA, VIOLET, GREEN, GRAY]
-data = {  # counts out of 856 (primary failure label)
+data = {
     "S0": [281, 114, 250, 44, 153, 0, 9, 5],
     "S1": [441, 122, 0, 62, 171, 9, 28, 23],
     "S2": [472, 123, 0, 39, 155, 7, 26, 34],

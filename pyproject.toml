@@ -20,6 +20,5 @@ dependencies = [
 [dependency-groups]
 dev = ["pytest>=8"]
 
-# This is a folder of scripts, not an installable package.
 [tool.uv]
 package = false

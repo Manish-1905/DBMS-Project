@@ -1,28 +1,3 @@
-#!/usr/bin/env python3
-"""
-Extract the schema of the graph currently loaded in Neo4j.
-(Roadmap Part 3: "schema = graph.inspect()")
-
-Output uses the same JSON format as MTQ's `schema` column, plus extras:
-    {
-      "node_props":    {Label: [{"property", "datatype"}, ...]},
-      "rel_props":     {TYPE:  [{"property", "datatype"}, ...]},
-      "relationships": [{"start", "type", "end"}, ...],
-      "indexes":       [...],
-      "constraints":   [...],
-      "value_stats":   {"Label.prop": {"distinct", "non_null", "top_values" | "min"/"max"}},
-      "schema_version": "<sha256 of the structural part>"
-    }
-
-schema_version changes whenever labels / relationship types / properties
-change, but NOT when only the data values change. (value_stats are about
-the graph *state*, which is what Part 5 uses.)
-
-    uv run schema_inspect.py --out schemas/er.json
-    uv run schema_inspect.py --out schemas/er.json --compare-mtq --data-source er
-    uv run schema_inspect.py --no-values      # skip value stats (faster)
-"""
-
 import argparse
 import hashlib
 import json
@@ -33,10 +8,6 @@ from pathlib import Path
 from neo4j import GraphDatabase, READ_ACCESS
 
 
-# Neo4j property type names -> the names used in MTQ / LangChain schemas.
-# Older Neo4j 5 versions report Java-style names ("String", "Long",
-# "StringArray"); newer ones report Cypher types ("STRING NOT NULL",
-# "INTEGER", "LIST<STRING NOT NULL>"). Keys here are upper-case, no spaces.
 TYPE_MAP = {
     "STRING": "STRING", "LONG": "INTEGER", "INTEGER": "INTEGER", "INT": "INTEGER",
     "DOUBLE": "FLOAT", "FLOAT": "FLOAT", "BOOLEAN": "BOOLEAN",
@@ -47,7 +18,6 @@ TYPE_MAP = {
     "DURATION": "DURATION", "POINT": "POINT",
 }
 
-# Only keep the most common values when a property has this few distinct values.
 MAX_CATEGORICAL = 50
 TOP_K_VALUES = 20
 
@@ -64,7 +34,6 @@ def _type(types):
 
 
 def _q(name):
-    """Backtick-quote an identifier for use in Cypher."""
     return "`" + name.replace("`", "``") + "`"
 
 
@@ -81,7 +50,6 @@ class GraphInspector:
                                  default_access_mode=READ_ACCESS) as s:
             return s.run(cypher, **params).data()
 
-    # ---------------- structure ----------------
 
     def node_props(self):
         out = {}
@@ -106,7 +74,6 @@ class GraphInspector:
         return {k: v for k, v in out.items() if v}
 
     def relationships(self):
-        """Actual (start label, type, end label) triples, with direction."""
         rows = self.run(
             "MATCH (a)-[r]->(b) "
             "UNWIND labels(a) AS s UNWIND labels(b) AS e "
@@ -130,7 +97,6 @@ class GraphInspector:
             return []
         return sorted(rows, key=lambda r: r["name"])
 
-    # ---------------- values (graph state) ----------------
 
     def value_stats(self, node_props):
         stats = {}
@@ -157,7 +123,6 @@ class GraphInspector:
                 stats[key] = entry
         return stats
 
-    # ---------------- all together ----------------
 
     def inspect(self, with_values=True):
         schema = {
@@ -174,7 +139,6 @@ class GraphInspector:
 
 
 def schema_version(schema):
-    """Deterministic hash of the structural schema (order independent)."""
     structural = {
         "node_props": {k: sorted((p["property"], p["datatype"]) for p in v)
                        for k, v in schema.get("node_props", {}).items()},
@@ -188,7 +152,6 @@ def schema_version(schema):
 
 
 def compare_with_mtq(extracted, mtq_schema):
-    """Part 3.5: how much of MTQ's schema did we recover?"""
     mtq = json.loads(mtq_schema) if isinstance(mtq_schema, str) else mtq_schema
 
     def sets(s):

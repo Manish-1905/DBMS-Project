@@ -1,15 +1,3 @@
-#!/usr/bin/env python3
-"""
-Text embeddings for the semantic schema retriever (Roadmap Part 4.2, Retriever 2).
-
-Uses fastembed (ONNX, no PyTorch). The model (~130 MB) is downloaded from
-Hugging Face the first time and cached; after that it runs offline on CPU.
-
-    from embedder import get_embedder
-    emb = get_embedder()                     # BAAI/bge-small-en-v1.5
-    emb.embed_query("films after 2000")      # -> unit vector (list of floats)
-"""
-
 import hashlib
 import math
 import re
@@ -48,10 +36,6 @@ class Embedder:
 
 
 class HashEmbedder:
-    """
-    Dependency-free stand-in (bag of hashed word stems). Used by the tests and
-    for a quick dry run; it is NOT a semantic model.
-    """
     model_name = "hash-bow"
 
     def __init__(self, dim=256):
@@ -75,7 +59,6 @@ _INSTANCES = {}
 
 
 def get_embedder(model_name=DEFAULT_MODEL):
-    """Shared instance per model ('hash' gives the HashEmbedder stand-in)."""
     if model_name not in _INSTANCES:
         _INSTANCES[model_name] = HashEmbedder() if model_name == "hash" else Embedder(model_name)
     return _INSTANCES[model_name]

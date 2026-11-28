@@ -1,46 +1,3 @@
-#!/usr/bin/env python3
-"""
-Graph-state experiment: same schema, same questions, different stored values.
-(Roadmap Part 5.5)
-
-A Text2Cypher system that relies on what it "knows" keeps writing the values
-it expects ('Female', 'US'); a graph-aware system reads the current graph and
-adapts. To test this, make a COPY of the ER graph whose values are recoded:
-
-  state B ("recoded")    User.gender  Female/Male -> F/M
-                         User.country US          -> United States
-                         Genre.name   Drama       -> DRAMA (upper case)
-  state C ("relabelled") User.state   Ohio        -> OH (postal codes)
-                         User.gender  Female/Male -> female/male
-                         Movie.title  The Matrix  -> Matrix, The
-  state R (schema change, roadmap 8.4 "G3")
-                         label Genre -> Category, relationship WATCHED -> VIEWED,
-                         property Movie.title -> Movie.name
-
-Steps (the original database is never written to):
-
-    # 1. copy the graph into a new database and recode it
-    uv run graph_state.py create --source $DB --target erstateb --state B
-
-    # 2. value catalog of the recoded graph
-    uv run value_index.py --neo4j-database erstateb --out values/er_stateB.json
-
-    # 3. gold queries rewritten to the new values (questions unchanged)
-    uv run graph_state.py rewrite-gold --state B \\
-        --parquet Benchmark/MTQ-Auto/test-split.parquet \\
-        --out Benchmark/MTQ-Auto/test-split-stateB.parquet
-
-    # 4. static vs graph-aware, on the questions whose values changed
-    uv run main.py --parquet Benchmark/MTQ-Auto/test-split-stateB.parquet \\
-        --neo4j-database erstateb --mode retrieved_schema ...
-    uv run main.py --parquet Benchmark/MTQ-Auto/test-split-stateB.parquet \\
-        --neo4j-database erstateb --mode grounded --values-file values/er_stateB.json ...
-
-`create` needs a Neo4j edition that can create databases (Neo4j Desktop's
-developer licence can). Otherwise create the database yourself and add
---no-create.
-"""
-
 import argparse
 import json
 import os
@@ -51,10 +8,6 @@ from neo4j import GraphDatabase, READ_ACCESS
 from gold_schema import literal_spans
 from grounding import _US_STATES
 
-# ------------------------------------------------------------
-# Graph states: (Label, property) -> transform
-# transform is a dict {old: new} or one of "upper", "lower", "postal", "article_last"
-# ------------------------------------------------------------
 
 STATES = {
     "B": {
@@ -69,7 +22,6 @@ STATES = {
     },
 }
 
-# Schema changes (roadmap 8.4, "G3: same domain, changed schema").
 SCHEMA_STATES = {
     "R": {"labels": {"Genre": "Category"},
           "rels": {"WATCHED": "VIEWED"},
@@ -107,12 +59,7 @@ def state_mapping(state):
     return {f"{label}.{prop}": how for (label, prop), how in STATES[state].items()}
 
 
-# ------------------------------------------------------------
-# Gold query rewriting (no Neo4j needed)
-# ------------------------------------------------------------
-
 def rewrite_cypher(cypher, mapping):
-    """Replace compared literals of mapped properties; returns (cypher, changed)."""
     spans = [s for s in literal_spans(cypher) if s[2] in mapping]
     changed = False
     out, last = [], 0
@@ -130,12 +77,11 @@ def rewrite_cypher(cypher, mapping):
 
 
 def rename_cypher(cypher, state):
-    """Apply a schema change (labels, relationship types, properties) to a query."""
     spec = SCHEMA_STATES[state]
     out = cypher
     strings = []
 
-    def hide(m):                      # don't touch text inside string literals
+    def hide(m):
         strings.append(m.group(0))
         return f"\x00{len(strings) - 1}\x00"
     out = re.sub(r"'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"", hide, out)
@@ -152,7 +98,6 @@ def rename_cypher(cypher, state):
         vars_ = [v for v, ls in varmap.items() if new_label in ls]
         for v in vars_:
             out = re.sub(rf"\b{re.escape(v)}\s*\.\s*`?{old}`?\b", f"{v}.{new}", out)
-        # inline maps in node patterns of that label: (m:Movie {title: ...})
         out = re.sub(rf"(\(\s*\w*\s*:\s*{new_label}\b[^)]*?[{{,]\s*)`?{old}`?(\s*:)",
                      rf"\g<1>{new}\g<2>", out)
     return re.sub(r"\x00(\d+)\x00", lambda m: strings[int(m.group(1))], out)
@@ -210,16 +155,11 @@ def rewrite_gold(parquet, out, state, affected_only=False, keep_schema=False):
     print(f"written to {out}")
 
 
-# ------------------------------------------------------------
-# Copy + recode (writes ONLY to the target database)
-# ------------------------------------------------------------
-
 def _q(name):
     return "`" + name.replace("`", "``") + "`"
 
 
 def clone(driver, source, target, batch=5000):
-    """Copy all nodes and relationships from `source` to (empty) `target`."""
     def wr(cypher, **kw):
         return driver.execute_query(cypher, database_=target, **kw)
 
@@ -251,7 +191,6 @@ def clone(driver, source, target, batch=5000):
             n_rels += 1
         for t, rows in groups.items():
             _write_rels(wr, t, rows)
-    # remove the helper label/property/index
     while True:
         left = wr("MATCH (n:`__Clone`) WITH n LIMIT $b REMOVE n:`__Clone`, n.`__cid` "
                   "RETURN count(*) AS c", b=batch).records[0]["c"]
@@ -274,7 +213,6 @@ def _write_rels(wr, rtype, rows):
 
 
 def recode(driver, target, state):
-    """Apply a state's value changes in `target`; returns {prop: changed count}."""
     counts = {}
     for (label, prop), how in STATES[state].items():
         L, P = _q(label), _q(prop)
@@ -294,7 +232,6 @@ def recode(driver, target, state):
 
 
 def rename_in_db(driver, target, state, batch=5000):
-    """Apply a schema change in `target` (labels, relationship types, properties)."""
     spec = SCHEMA_STATES[state]
     done = {}
 
@@ -365,7 +302,7 @@ def create(a):
 
 
 def main():
-    p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    p = argparse.ArgumentParser(description="Graph-state experiment: copy the graph with changed values or schema, and rewrite the gold queries.")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     c = sub.add_parser("create", help="copy the graph to a new database and recode it")

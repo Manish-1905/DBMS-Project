@@ -1,4 +1,3 @@
-"""Part 5: gold values, grounding, value variants, graph states, grounded prompt."""
 import pytest
 
 from gold_schema import gold_literals, literal_spans
@@ -29,8 +28,6 @@ def found(g, q, **kw):
     return {(x["property"], x["value"]) for x in g.ground(q, **kw)}
 
 
-# ---------- gold values ----------
-
 def test_gold_literals():
     q = ("MATCH (u:User {gender: 'Female'})-[:WATCHED]->(m:Movie) WHERE u.state = 'Ohio' "
          "AND m.title IN ['A', 'B'] AND u.email ENDS WITH 'x.com' RETURN m")
@@ -44,8 +41,6 @@ def test_literal_spans_point_at_quotes():
     (start, end, prop, value), = literal_spans(q)
     assert q[start:end] == "'Female'" and prop == "User.gender"
 
-
-# ---------- grounding ----------
 
 @pytest.mark.parametrize("question,expected,method", [
     ("movies watched by female users", ("User.gender", "Female"), "case"),
@@ -69,7 +64,6 @@ def test_grounding_methods(g, question, expected, method):
 
 
 def test_common_words_are_not_titles(g):
-    # "up" is a movie title, but a lowercase common word must not match it
     assert ("Movie.title", "Up") not in found(g, "what is it about up?")
     assert ("Movie.title", "Up") in found(g, "who watched 'Up'?")
 
@@ -98,8 +92,6 @@ def test_state_version_tracks_values():
     assert state_version(a) != state_version(b)
 
 
-# ---------- value variants ----------
-
 def test_variant_helpers():
     assert typo("Fantasy") == "Fanatsy"
     assert partial("Bill Traylor: Chasing Ghosts") == "Bill Traylor"
@@ -110,8 +102,6 @@ def test_variant_helpers():
     assert v["unquoted"] == "Which users from Ohio watched movies?"
     assert v["alias"] == "Which users from 'OH' watched movies?"
 
-
-# ---------- graph states ----------
 
 def test_transforms():
     assert transform_value("Ohio", "postal") == "OH"
@@ -129,7 +119,7 @@ def test_rewrite_gold_is_property_aware():
     assert changed
     assert "{gender: 'F'}" in out and "u.country = 'United States'" in out
     assert "['DRAMA', 'COMEDY']" in out
-    assert "u.firstName = 'Female'" in out          # other property untouched
+    assert "u.firstName = 'Female'" in out
 
 
 def test_rewrite_gold_unaffected_query():
