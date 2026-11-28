@@ -2,6 +2,12 @@
 
 Natural language → Cypher, evaluated by executing queries against MTQ graphs in Neo4j.
 
+**Team:** Saurabh Sharma (2024MCB1311), Triman Singh Tuteja (2023EPB1283),
+Manish Kumar Chatakunda (2024MCB1302), Kushagra Gupta (2024MCB1299),
+Ipsita Pandey (2023EEB1210)
+
+**Final report:** [`report/report.pdf`](report/report.pdf) · results: [`results/`](results/)
+
 ```
 question (+ schema) ──► llama.cpp LLM ──► Cypher ──► Neo4j (read-only) ──► SQLite ──► evaluate.py
 ```
