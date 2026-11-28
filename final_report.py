@@ -1,35 +1,3 @@
-#!/usr/bin/env python3
-"""
-Final evaluation table across systems. (Roadmap Part 8.1-8.2)
-
-Collects runs from one or more SQLite files, keeps only the questions that
-ALL selected runs answered (so every system is measured on the same
-questions), and computes the roadmap's metrics in the same way for each:
-
-    syntax accuracy     a query was produced and it is valid Cypher (no F1)
-    schema accuracy     labels, relationship types + direction, properties and
-                        value types all exist in the schema (no F2-F6)
-    entity accuracy     of the questions whose gold query compares values:
-                        the query uses exactly those values (all of them)
-    execution accuracy  the query ran without error
-    result accuracy     same result as the gold query      <- main metric
-    empty-result rate   ran, but returned no rows
-    repair success      flagged first attempts that the repair loop fixed
-    selective answering answer only when the guard found no problem:
-                        coverage (share answered) and accuracy of those
-    avg latency         LLM generation + query execution, seconds
-    avg tokens          prompt + completion tokens (runs recorded after
-                        token logging was added)
-
-Paired McNemar tests compare each system with the one before it.
-
-    uv run final_report.py \\
-        --run S0=results.sqlite:no_schema --run S1=results.sqlite:full_schema \\
-        --run S2=results.sqlite:retrieved_schema --run S3=plan.sqlite:grounded \\
-        --run S5=plan.sqlite:ir --run S7=repair.sqlite:grounded_repair2 \\
-        --out results/final_table.md
-"""
-
 import argparse
 import json
 import os
@@ -47,7 +15,6 @@ _PARAM = re.compile(r"\$(\w+)")
 
 
 def inline_params(cypher, params):
-    """Put parameter values back into the text, for value/entity analysis."""
     if not params:
         return cypher
 
@@ -62,7 +29,6 @@ def inline_params(cypher, params):
 
 
 def load_run(spec):
-    """'S3=plan.sqlite:grounded' -> (label, rows) ; run id may be a prefix."""
     label, _, rest = spec.partition("=")
     path, _, prefix = rest.rpartition(":")
     if not label or not path or not prefix:
@@ -155,7 +121,6 @@ def main():
     if not a.all_questions:
         common = set.intersection(*[{key(r) for r in rows} for _, _, rows in runs])
         runs = [(lab, rid, [r for r in rows if key(r) in common]) for lab, rid, rows in runs]
-        # one row per question per run (a sample can't contain duplicates, but be safe)
         runs = [(lab, rid, list({key(r): r for r in rows}.values())) for lab, rid, rows in runs]
     ms = [(lab, rid, metrics(rows, schemas), rows) for lab, rid, rows in runs]
 

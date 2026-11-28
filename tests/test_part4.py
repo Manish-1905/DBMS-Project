@@ -1,4 +1,3 @@
-"""Part 4: distractors, ranked metrics, embedding / hybrid retrieval."""
 import json
 
 import pytest
@@ -34,7 +33,6 @@ def test_real_schema_kept_and_never_rewired(er_schema):
         assert r in noisy["relationships"]
     for r in noisy["relationships"]:
         if r["type"] in info["rels"]:
-            # a distractor relationship always touches a distractor label
             assert not ({r["start"], r["end"]} <= real)
     assert not (set(info["labels"]) & real)
 
@@ -61,7 +59,7 @@ def test_embedding_methods_run_and_prune(er_schema, method):
     assert len(pruned["node_props"]) < len(noisy["node_props"])
     rl, _ = rank_elements("How many movies did each user watch?", noisy,
                           method=method, embedder=HashEmbedder())
-    assert len(rl) == len(noisy["node_props"])   # full ranking, no cutoff
+    assert len(rl) == len(noisy["node_props"])
 
 
 def test_embed_needs_embedder(er_schema):

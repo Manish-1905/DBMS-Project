@@ -1,25 +1,3 @@
-#!/usr/bin/env python3
-"""
-Compute benchmark metrics from the SQLite file written by main.py.
-
-Usage:
-    python evaluate.py --sqlite cypher_benchmark.sqlite
-    python evaluate.py --sqlite cypher_benchmark.sqlite --rows-csv per_question.csv
-    python evaluate.py --sqlite cypher_benchmark.sqlite --by-type   # + per query_type table
-    python evaluate.py --sqlite noise.sqlite --compare RUN_A RUN_B  # paired comparison
-
-Metrics (one row per run / mode / model / dataset):
-    runnable          LLM query executed without error
-    empty             executed but returned no rows (e.g. wrong value)
-    non_null          executed AND returned at least one non-null value
-    result_correct    LLM result == gold result (column names ignored;
-                      row order ignored unless the gold query has ORDER BY)
-    exact_match       query text identical after normalising whitespace/case
-    avg_llm_exec_ms   mean Neo4j time for LLM queries that ran
-    avg_gold_exec_ms  mean Neo4j time for gold queries
-    avg_gen_s         mean LLM generation time
-"""
-
 import argparse
 import csv
 import json
@@ -30,7 +8,6 @@ from collections import Counter, defaultdict
 
 
 def normalise_value(v):
-    """Make values comparable: round floats, sort lists inside cells."""
     if isinstance(v, float):
         return round(v, 4)
     if isinstance(v, list):
@@ -41,11 +18,6 @@ def normalise_value(v):
 
 
 def row_key(row):
-    """
-    A row is a dict like {"name": "Tom", "count": 3}. The LLM may use
-    different column aliases than the gold query, so compare the
-    *values* only, as a sorted multiset.
-    """
     vals = [json.dumps(normalise_value(v), sort_keys=True, default=str)
             for v in row.values()]
     return tuple(sorted(vals))
@@ -81,7 +53,7 @@ def load(path):
     conn.row_factory = sqlite3.Row
     cols = {r[1] for r in conn.execute("PRAGMA table_info(benchmark_results)")}
     rows = [dict(r) for r in conn.execute("SELECT * FROM benchmark_results")]
-    for r in rows:  # older files have no mode/run_id columns
+    for r in rows:
         for c in ("mode", "prompt_version", "run_id"):
             if c not in cols or r.get(c) is None:
                 r[c] = "legacy"
@@ -89,7 +61,6 @@ def load(path):
 
 
 def query_features(cypher):
-    """Roadmap Part 6 breakdown of the GOLD query: hops and clause types."""
     u = (cypher or "").upper()
     hops = len(re.findall(r"-\[[^\]]*\]-|-->|<--", cypher or ""))
     return {
@@ -139,8 +110,6 @@ def evaluate_row(r):
         "gold_ok": gold_ok,
         "runnable": llm_ok,
         "non_null": llm_ok and has_non_null(llm.get("result")),
-        # ran fine but returned no rows: typical of a wrong value ('female'
-        # instead of 'Female') or a non-existent label
         "empty": llm_ok and not llm.get("result"),
         "result_correct": llm_ok and gold_ok and results_match(
             llm.get("result"), gold.get("result"), ordered),
@@ -169,7 +138,6 @@ def fmt(x, scale=1, digits=2, pct=False):
 
 
 def print_table(rows, keys):
-    """One markdown row per distinct combination of `keys`."""
     groups = defaultdict(list)
     for r in rows:
         groups[tuple(str(r[k]) for k in keys)].append(r)
@@ -197,7 +165,6 @@ def print_table(rows, keys):
 
 
 def mcnemar_p(b, c):
-    """Exact two-sided McNemar test on the discordant pairs b, c."""
     n = b + c
     if n == 0:
         return 1.0
@@ -207,11 +174,6 @@ def mcnemar_p(b, c):
 
 
 def compare_runs(rows, run_a, run_b):
-    """
-    Paired comparison on the questions both runs answered: how many each
-    got right that the other didn't, and whether the difference is more than
-    chance (McNemar). Run ids can be given as unique prefixes.
-    """
     ids = sorted({r["run_id"] for r in rows})
 
     def resolve(x):

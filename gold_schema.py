@@ -1,33 +1,14 @@
-#!/usr/bin/env python3
-"""
-Extract the "gold schema set" of a Cypher query: the labels, relationship
-types and properties it actually uses. (Roadmap Part 4.4)
-
-This is what a schema retriever must recover for the LLM to be able to
-answer the question, so it is the ground truth for retrieval recall.
-
-    from gold_schema import gold_schema_set
-    gold_schema_set("MATCH (u:User)-[:WATCHED]->(m:Movie) RETURN m.title")
-    # {'labels': {'User', 'Movie'}, 'rels': {'WATCHED'}, 'props': {'Movie.title'}}
-
-Regex based, so it is approximate, but good enough for MTQ-style queries.
-"""
-
 import re
 
 _IDENT = r"`[^`]+`|[A-Za-z_][A-Za-z0-9_]*"
 
-# (var:Label:Label2 ...   or   (:Label
 _NODE = re.compile(
     rf"\(\s*({_IDENT})?\s*((?::\s*(?:{_IDENT})\s*)+)"
 )
-# [var:TYPE|TYPE2 ...   or   [:TYPE
 _REL = re.compile(
     rf"\[\s*({_IDENT})?\s*:\s*((?:{_IDENT})(?:\s*\|\s*:?\s*(?:{_IDENT}))*)"
 )
-# var.prop
 _PROP = re.compile(rf"\b({_IDENT})\s*\.\s*({_IDENT})")
-# inline map inside a node pattern: (n:Label {prop: ...})
 _INLINE = re.compile(
     rf"\(\s*({_IDENT})?\s*((?::\s*(?:{_IDENT})\s*)+)\{{([^}}]*)\}}"
 )
@@ -38,8 +19,6 @@ def _clean(name):
     return name.strip().strip("`")
 
 
-# What precedes a string literal that is compared to a property:
-#   u.gender = 'X'   u.state <> 'X'   g.name IN ['X', 'Y'   (:User {gender: 'X'
 _CMP_BEFORE = re.compile(
     rf"({_IDENT})\s*\.\s*({_IDENT})\s*(?:=|<>)\s*$"
     rf"|({_IDENT})\s*\.\s*({_IDENT})\s+IN\s*\[[^\]]*$",
@@ -65,12 +44,6 @@ def _var_map(q):
 
 
 def literal_spans(cypher):
-    """
-    Every string literal that is compared *exactly* with a property:
-    list of (start, end, "Label.prop", value), where cypher[start:end] is the
-    literal including its quotes. Partial matches (CONTAINS, STARTS WITH, =~)
-    are left out.
-    """
     if not cypher:
         return []
     var_to_names = _var_map(_STRINGS.sub("''", cypher))
@@ -93,26 +66,17 @@ def literal_spans(cypher):
 
 
 def gold_literals(cypher):
-    """
-    String values the query compares a property with *exactly*
-    (=, <>, IN [...], inline {prop: 'x'}):
-
-        gold_literals("MATCH (u:User {gender: 'Female'}) WHERE u.state = 'Ohio' ...")
-        -> {("User.gender", "Female"), ("User.state", "Ohio")}
-    """
     return {(prop, value) for _, _, prop, value in literal_spans(cypher)}
 
 
 def gold_schema_set(cypher):
-    """Return {'labels': set, 'rels': set, 'props': set('Label.prop')}."""
     if not cypher:
         return {"labels": set(), "rels": set(), "props": set()}
 
-    # Remove string literals so "a:b" inside quotes is not parsed.
     q = _STRINGS.sub("''", cypher)
 
     labels, rels, props = set(), set(), set()
-    var_to_names = {}  # variable -> set of labels / rel types
+    var_to_names = {}
 
     for m in _NODE.finditer(q):
         var = _clean(m.group(1)) if m.group(1) else None

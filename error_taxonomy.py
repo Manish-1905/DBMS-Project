@@ -1,26 +1,3 @@
-#!/usr/bin/env python3
-"""
-Label every wrong answer with the roadmap's failure taxonomy. (Part 7.6)
-
-Works on any results SQLite file (old runs included). No LLM and no Neo4j:
-it uses the stored generated query, its stored error, the gold query, the
-schema and (optionally) the value catalog.
-
-    F1  syntax error               F8  value mismatch
-    F2  nonexistent label          F9  incorrect traversal
-    F3  nonexistent relationship   F10 aggregation error
-    F4  wrong relationship direction  F11 temporal error
-    F5  nonexistent property       F12 performance failure
-    F6  wrong property type        F13 authorization failure
-    F7  entity resolution error    F14 semantic failure
-
-A wrong answer can get several labels; the "primary" label is the first one
-in the order above (earlier = more basic).
-
-    uv run error_taxonomy.py --sqlite results.sqlite --values values/er.json
-    uv run error_taxonomy.py --sqlite plan.sqlite --csv errors.csv
-"""
-
 import argparse
 import csv
 import json
@@ -43,7 +20,6 @@ _NUM = re.compile(r"(?<![\w.])-?\d+(?:\.\d+)?(?![\w.])")
 
 
 def labels_for(row, sch, catalog):
-    """Failure codes for one wrong answer."""
     cy, gold = row["llm_cypher"] or "", row["gold_cypher"] or ""
     codes = []
     if not cy.strip():
@@ -53,7 +29,6 @@ def labels_for(row, sch, catalog):
     codes += [f["code"] for f in policy_check(cy) + schema_check(cy, sch)]
     if catalog:
         codes += [f["code"] for f in value_check(cy, catalog)]
-    # value differences against the gold query (works without a catalog)
     g_vals, c_vals = gold_literals(gold), gold_literals(cy)
     g_by, c_by = defaultdict(set), defaultdict(set)
     for p, v in g_vals:

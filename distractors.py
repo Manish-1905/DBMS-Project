@@ -1,43 +1,9 @@
-#!/usr/bin/env python3
-"""
-Controlled schema distractors. (Roadmap Part 4.5)
-
-Pads a real schema with fake-but-plausible node labels and relationship types,
-so the LLM sees a large, noisy schema while the question and the graph stay
-the same:
-
-    share = fraction of the final schema elements (labels + relationship types)
-            that are distractors.  ER has 4 labels + 3 relationship types = 7:
-
-        share 0.40 ->   5 distractors  (12 elements)
-        share 0.60 ->  11 distractors  (18 elements)
-        share 0.80 ->  28 distractors  (35 elements)
-        share 0.95 -> 133 distractors (140 elements)
-
-Only the schema TEXT given to the LLM changes. The Neo4j graph is untouched,
-so gold queries still run; an LLM query that uses a distractor simply returns
-nothing (or fails) and is scored as wrong.
-
-Distractors are:
-  * "hard": names that share words with real labels (UserProfile, MovieReview,
-    GenreTag, IpBlock ...) and common property names (name, title, year ...);
-  * "easy": unrelated streaming/e-commerce/ops concepts (Invoice, Warehouse ...).
-Distractor relationships always touch at least one distractor label, so the
-real labels are never connected to each other in a new way.
-
-Deterministic: the same (schema, share, seed) always gives the same schema.
-
-    uv run distractors.py --share 0.8                      # print a summary
-    uv run distractors.py --share 0.8 --out noisy_er.json  # write the schema
-"""
-
 import argparse
 import json
 import random
 
 LEVELS = (0.0, 0.4, 0.6, 0.8, 0.95)
 
-# Words joined to real label names to make "hard" distractors (UserProfile ...).
 HARD_SUFFIXES = ["Profile", "Review", "Tag", "Group", "Session", "Rating", "Block",
                  "Account", "List", "Award", "Region", "Archive", "Clip", "Note"]
 
@@ -88,10 +54,6 @@ def n_distractors(n_real, share):
 
 
 def add_distractors(schema, share, seed=0, hard_fraction=0.5):
-    """
-    Return (noisy_schema, info). `info` has the distractor label / relationship
-    names and counts. The input schema is not modified.
-    """
     s = json.loads(schema) if isinstance(schema, str) else schema
     real_labels = sorted(set(s.get("node_props", {}))
                          | {r["start"] for r in s.get("relationships", [])}
@@ -112,7 +74,6 @@ def add_distractors(schema, share, seed=0, hard_fraction=0.5):
     n_hard = round(n_lab * hard_fraction)
     pool = [x for x in hard if x not in taken][:n_hard]
     pool += [x for x in easy if x not in taken and x not in pool]
-    # if the pools run out, number them
     i = 2
     while len(pool) < n_lab:
         pool.append(f"{easy[(i - 2) % len(easy)]}{i}")
@@ -135,7 +96,6 @@ def add_distractors(schema, share, seed=0, hard_fraction=0.5):
     relationships = list(s.get("relationships", []))
     rel_props = {k: list(v) for k, v in s.get("rel_props", {}).items()}
     for T in d_rels:
-        # always touch a distractor label; half the time connect to a real one
         a = rnd.choice(d_labels) if d_labels else rnd.choice(real_labels)
         b = rnd.choice(real_labels if (rnd.random() < 0.5 or len(d_labels) < 2) else d_labels)
         start, end = (a, b) if rnd.random() < 0.5 else (b, a)

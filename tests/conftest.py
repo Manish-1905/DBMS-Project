@@ -6,7 +6,6 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-# Same shape as the MTQ "er" schema.
 ER_SCHEMA = {
     "node_props": {
         "User": [{"property": "userId", "datatype": "INTEGER"},

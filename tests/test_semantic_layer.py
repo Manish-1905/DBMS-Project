@@ -36,7 +36,7 @@ def test_llm_layer_drops_invented_properties(er_schema, monkeypatch):
 
     monkeypatch.setattr(sl.requests, "post", fake_post)
     sem = sl.llm_semantics(er_schema, "http://x", verbose=False)
-    assert sem["labels"]["Movie"]["aliases"] == ["film"]        # lower-cased, own name + junk dropped
+    assert sem["labels"]["Movie"]["aliases"] == ["film"]
     assert "Movie.title" in sem["properties"]
     assert not any(k.endswith(".madeUp") for k in sem["properties"])
 
@@ -61,6 +61,6 @@ def test_overrides_replace_or_add_aliases():
     out = sl.apply_overrides(sem, {"labels": {
         "Genre": {"aliases": ["category", "Genres"]},
         "User": {"add_aliases": ["viewer"], "description": "A viewer"}}})
-    assert out["labels"]["Genre"]["aliases"] == ["category", "genres"]   # "type" removed
+    assert out["labels"]["Genre"]["aliases"] == ["category", "genres"]
     assert out["labels"]["User"]["aliases"] == ["person", "viewer"]
     assert out["labels"]["User"]["description"] == "A viewer"

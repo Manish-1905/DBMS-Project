@@ -1,36 +1,3 @@
-#!/usr/bin/env python3
-"""
-Entity / value grounding. (Roadmap Part 5.1-5.2)
-
-Finds the values a question talks about and maps them to values that exist
-in the CURRENT graph (from value_index.py):
-
-    "female users from ohio who watched 'Four Chrismases'"
-      "female"          -> User.gender = 'Female'                (case)
-      "ohio"            -> User.state  = 'Ohio'                  (case)
-      "Four Chrismases" -> Movie.title = 'Four Christmases'      (fuzzy)
-
-Pipeline per question:
-    1. candidate mentions : quoted text, Capitalised spans, word n-grams
-    2. exact match        : same text (or same text ignoring case/punctuation,
-                            or same word stem for small value sets: comedies)
-    3. alias match        : built-in equivalences (US/USA/United States,
-                            Ohio/OH, female/F/women ...)
-    4. typo / fuzzy match : small edit distance, a swapped pair of letters
-                            counting as one edit (femlae, Fanatsy); partial
-                            titles ('Bill Traylor') by fuzzy matching (rapidfuzz)
-    5. context check      : prefer properties whose name/label the question
-                            mentions, or that the retrieved schema contains
-    6. ranking            : confidence score; overlapping mentions resolved
-                            in favour of longer / better matches
-
-Single lowercase words only match small value sets (gender, country, state,
-genre ...), never movie titles or people's names, so "up" or "her" in a
-question does not become a title.
-
-    uv run grounding.py --values values/er.json "female users from ohio"
-"""
-
 import argparse
 import json
 import re
@@ -41,10 +8,9 @@ from schema_retriever import STOPWORDS, tokens
 try:
     from rapidfuzz import fuzz, process
     from rapidfuzz.distance import OSA
-except ImportError:  # pragma: no cover
+except ImportError:
     fuzz = process = OSA = None
 
-# Value sets with at most this many distinct values count as "small".
 LOW_CARDINALITY = 200
 MAX_NGRAM = 8
 
@@ -57,8 +23,6 @@ QUESTION_WORDS = STOPWORDS | {
     "retrieve", "get", "provide", "identify", "determine", "calculate",
 }
 
-# Built-in equivalence groups (all lower-case). A question saying any member
-# matches a stored value equal to any other member.
 _US_STATES = {
     "alabama": "al", "alaska": "ak", "arizona": "az", "arkansas": "ar",
     "california": "ca", "colorado": "co", "connecticut": "ct", "delaware": "de",
@@ -84,7 +48,6 @@ EQUIVALENCES = [
     {"science fiction", "sci-fi", "scifi"},
     *({name, code} for name, code in _US_STATES.items()),
 ]
-# Short codes are only trusted in these directions / contexts.
 _AMBIGUOUS_SHORT = {"in", "me", "or", "oh", "ok", "hi", "de", "co", "la", "pa",
                     "ma", "al", "id", "m", "f", "us", "man", "men"}
 
@@ -102,36 +65,33 @@ class Grounder:
         self.values = {k: list(v.get("values", {})) for k, v in props.items()
                        if v.get("values")}
         self.low_card = {k for k, vs in self.values.items() if len(vs) <= low_cardinality}
-        self.exact = defaultdict(list)       # norm(value) -> [(prop, value)]
+        self.exact = defaultdict(list)
         for k, vs in self.values.items():
             for v in vs:
                 self.exact[norm(v)].append((k, v))
         self.norm_lists = {k: [norm(v) for v in vs] for k, vs in self.values.items()}
-        self.stemmed = defaultdict(list)     # "comedi" -> [("Genre.name", "Comedy")]
+        self.stemmed = defaultdict(list)
         for k in self.low_card:
             for v in self.values[k]:
                 st = " ".join(tokens(v))
                 if st:
                     self.stemmed[st].append((k, v))
-        self.alias = defaultdict(set)        # norm(term) -> equivalent terms
+        self.alias = defaultdict(set)
         for group in EQUIVALENCES:
             for t in group:
                 self.alias[t] |= group - {t}
 
-    # ---------- 1. mentions ----------
 
     @staticmethod
     def _words(question):
         return [(m.group(), m.start(), m.end()) for m in re.finditer(r"\S+", question)]
 
     def mentions(self, question):
-        """(text, start, end, kind) with kind in {quoted, capital, ngram}."""
         out = []
         for m in re.finditer(r"(?<![\w])'([^']{1,80})'(?![\w])|\"([^\"]{1,80})\"", question):
             g = 1 if m.group(1) is not None else 2
             out.append((m.group(g), m.start(g), m.end(g), "quoted"))
         words = self._words(question)
-        # Capitalised spans (Four Christmases, New York, Bill Traylor: Chasing Ghosts)
         connectors = {"of", "the", "a", "an", "in", "and", "&", "to", "for", "on", "-", ":"}
         i = 0
         while i < len(words):
@@ -157,20 +117,13 @@ class Grounder:
                 out.append((text, words[i][1], words[i + n - 1][2], "ngram"))
         return out
 
-    # ---------- 2-6. match, score, rank ----------
 
     @staticmethod
     def _max_typos(text):
-        """Edits allowed for a typo (a swap of two letters counts as one)."""
         n = len(text.replace(" ", ""))
         return 2 if n >= 9 else 1 if n >= 5 else 0
 
     def _licensed(self, prop, question, start):
-        """
-        The last few words before the mention name the property or its label:
-        "first name is jacquelyn", "firstName raddie", "the movie dune",
-        "titled up", "genre drama".
-        """
         before = question[max(0, start - 40):start]
         last = re.findall(r"[A-Za-z]+", before)[-3:]
         words = {w.lower() for w in last}
@@ -186,10 +139,6 @@ class Grounder:
         return bool(words & {"named", "called", "titled", "title"})
 
     def _allowed(self, prop, text, kind, question="", start=0):
-        """
-        High-cardinality values (titles, people's names) need a quoted /
-        capitalised / multi-word mention, or the property named just before it.
-        """
         if prop in self.low_card:
             return True
         if kind in ("quoted", "capital") or len(norm(text).split()) >= 2:
@@ -233,14 +182,12 @@ class Grounder:
                     hit = True
             if hit:
                 continue
-            # same word stem, small value sets only ("comedies" -> 'Comedy')
             if len(words) <= 3:
                 for prop, value in self.stemmed.get(" ".join(tokens(n)), ()):
                     add(text, start, end, prop, value, "stem", 0.95)
                     hit = True
             if hit:
                 continue
-            # alias: short ambiguous codes only count when quoted or capitalised
             if n in self.alias and (n not in _AMBIGUOUS_SHORT or kind != "ngram"
                                     or text.strip("'\"?,.").isupper()):
                 for eq in self.alias[n]:
@@ -250,10 +197,6 @@ class Grounder:
                             hit = True
             if hit or fuzz is None:
                 continue
-            # typos: a small edit distance where a swap of two letters is one
-            # edit (femlae, Fanatsy, Jacqeulyn). Quoted/capitalised mentions are
-            # checked against every value; plain words only against small value
-            # sets or a property named just before them.
             if not re.search(r"[a-z]", n):
                 continue
             k = self._max_typos(n)
@@ -274,8 +217,6 @@ class Grounder:
                         hit = True
             if hit:
                 continue
-            # fuzzy: longer quoted/capitalised mentions vs everything
-            # (partial titles: 'Bill Traylor' -> 'Bill Traylor: Chasing Ghosts')
             if kind in ("quoted", "capital"):
                 for prop in self.values:
                     for match, score, idx in process.extract(
@@ -284,9 +225,6 @@ class Grounder:
                         add(text, start, end, prop, self.values[prop][idx], "fuzzy",
                             0.85 * score / 100)
 
-        # ---- resolve overlaps: best (score, length) first; a span that is
-        # inside an already accepted span is dropped; ties on the same span
-        # are kept (ambiguity) when within 0.05 of the best for that span.
         cands.sort(key=lambda c: (-c["score"], -(c["end"] - c["start"])))
         accepted, best_for_span = [], {}
         seen = set()
@@ -311,7 +249,6 @@ class Grounder:
 
 
 def prompt_text(grounded):
-    """The block added to the LLM prompt in --mode grounded."""
     if not grounded:
         return ""
     lines = ["Values that exist in the graph for this question "

@@ -10,7 +10,6 @@ def test_keeps_what_the_question_needs(er_schema):
 
 def test_connects_distant_labels(er_schema):
     _, info = retrieve("Which genres does each user like?", er_schema)
-    # User and Genre are only connected through Movie
     assert {"User", "Movie", "Genre"} <= set(info["labels"])
     assert {"WATCHED", "HAS"} <= set(info["rels"])
 
